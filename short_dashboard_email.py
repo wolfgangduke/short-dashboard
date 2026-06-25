@@ -124,10 +124,17 @@ def build_report():
 
     primary = "INITIATE SHORT" if (breadth_3x and nl_decl) else f"WATCHING — Day {sum(1 for d in bdays if d[2] < 50)} of 3"
     layer2 = "CALENDAR GATE" if (fomc_hit or opex_hit) else "WAIT"
+    if layer2 == "CALENDAR GATE":
+        bottom = "NO TRADE — calendar gate (FOMC/OpEx)"
+    elif primary == "INITIATE SHORT":
+        bottom = "SHORT — conditions met"
+    else:
+        bottom = "NO TRADE — stay flat"
 
     def f2(x):
         return f"{x:,.2f}" if isinstance(x, (int, float)) else "n/a"
     L = ["SHORT — MACRO DASHBOARD", f"{today:%d %b %Y}  (cloud build)", "",
+         f">>> BOTTOM LINE: {bottom} <<<", "",
          f"PRIMARY VERDICT: {primary}", f"LAYER 2 VERDICT: {layer2}", "", "--- LIVE (auto) ---",
          f"SPX:   {f2(q['^GSPC'])}    {due(d_daily)}",
          f"VIX:   {f2(q['^VIX'])}   VVIX: {f2(q['^VVIX'])}   {due(d_daily)}"]
@@ -141,31 +148,4 @@ def build_report():
     L += [f"   {d}: {adv}/11 = {pct}%" for d, adv, pct in bdays]
     L += [f"   <50% for 3 closes: {breadth_3x}", "", "--- SENTIMENT (scrape w/ fallback) ---"]
     L.append(f"Fear & Greed: {fg_score} ({fg_rating})   {due(d_daily)}" if fg_score is not None
-             else f"Fear & Greed: manual [{fg_rating}] cnn.com/markets/fear-and-greed   {due(d_daily)}")
-    L.append(f"NAAIM Exposure: {naaim_v}   {due(d_naaim)}" if naaim_v is not None
-             else f"NAAIM Exposure: manual  naaim.org/programs/naaim-exposure-index/  {due(d_naaim)}")
-    L += ["", "--- CALENDAR GATE ---", f"   FOMC within 5d: {fomc_hit or 'clear'}",
-          f"   OpEx this month: {opex} (within 3d: {opex_hit or 'no'})",
-          "", "--- MANUAL (no free feed) ---",
-          f"   GEX gamma flip : spotgamma.com / squeezemetrics.com   {due(d_daily)}",
-          f"   McClellan Osc  : mcoscillator.com/market_breadth/daily/   {due(d_daily)}",
-          f"   COT (S&P futs) : cftc.gov/dea/options/deacmesf.htm   {due(d_cot)}",
-          "", f"--- STRUCTURAL (quarterly context)   {due(d_struct)} ---",
-          "   Private Debt/GDP, Credit Impulse, Maturity Wall, Policy Distortion"]
-    return today, primary, layer2, "\n".join(L)
-
-
-def send_email(subject, body):
-    user, pw, to = os.environ.get("GMAIL_USER"), os.environ.get("GMAIL_APP_PASSWORD"), os.environ.get("MAIL_TO")
-    if not (user and pw and to):
-        print("[no email creds — printing only]\n"); print(body); return
-    recipients = [a.strip() for a in to.split(",") if a.strip()]
-    msg = MIMEText(body); msg["Subject"] = subject; msg["From"] = user; msg["To"] = ", ".join(recipients)
-    with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=ssl.create_default_context()) as s:
-        s.login(user, pw); s.sendmail(user, recipients, msg.as_string())
-    print(f"[sent] {subject} -> {recipients}")
-
-
-if __name__ == "__main__":
-    today, primary, layer2, report = build_report()
-    send_email(f"SHORT — Macro Dashboard, {today:%d %b %Y}  [{primary} | {layer2}]", report)
+             else f"Fear & Greed:
