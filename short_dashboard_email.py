@@ -57,14 +57,25 @@ def treasury_2s10s():
 def hy_oas(): return fred_csv("BAMLH0A0HYM2")[-1]
 
 def quotes():
-    import yfinance as yf
-    out = {}
-    for s in ["^GSPC","^VIX","^VVIX","HG=F","GC=F"]:
+    """Batched download + retry. Single-symbol calls get throttled on CI IPs;
+    one batched request (like breadth) is far more reliable."""
+    import yfinance as yf, time
+    syms = ["^GSPC","^VIX","^VVIX","HG=F","GC=F"]
+    out = {s: None for s in syms}
+    for attempt in range(3):
         try:
-            h = yf.download(s, period="5d", progress=False, threads=False)["Close"].dropna()
-            out[s] = float(h.iloc[-1]) if len(h) else None
+            df = yf.download(syms, period="5d", progress=False, threads=False)["Close"].dropna(how="all")
+            if len(df):
+                last = df.tail(1).iloc[0]
+                for s in syms:
+                    v = last.get(s)
+                    if v is not None and v == v:   # not NaN
+                        out[s] = float(v)
+            if all(out[s] is not None for s in syms):
+                break
         except Exception:
-            out[s] = None
+            pass
+        time.sleep(2)
     return out
 
 def breadth_3day():
@@ -114,10 +125,12 @@ def build_report():
     primary = "INITIATE SHORT" if (breadth_3x and nl_decl) else f"WATCHING — Day {sum(1 for d in bdays if d[2] < 50)} of 3"
     layer2 = "CALENDAR GATE" if (fomc_hit or opex_hit) else "WAIT"
 
+    def f2(x):
+        return f"{x:,.2f}" if isinstance(x, (int, float)) else "n/a"
     L = ["SHORT — MACRO DASHBOARD", f"{today:%d %b %Y}  (cloud build)", "",
          f"PRIMARY VERDICT: {primary}", f"LAYER 2 VERDICT: {layer2}", "", "--- LIVE (auto) ---",
-         f"SPX:   {q['^GSPC']}    {due(d_daily)}",
-         f"VIX:   {q['^VIX']}   VVIX: {q['^VVIX']}   {due(d_daily)}"]
+         f"SPX:   {f2(q['^GSPC'])}    {due(d_daily)}",
+         f"VIX:   {f2(q['^VIX'])}   VVIX: {f2(q['^VVIX'])}   {due(d_daily)}"]
     if q['HG=F'] and q['GC=F']:
         L.append(f"Copper/Gold: {q['HG=F']/q['GC=F']:.5f}  (Cu {q['HG=F']:.2f}/Au {q['GC=F']:.0f})  {due(d_daily)}")
     L += [f"HY OAS (credit): {hy_v:.2f}%  [{hy_d}]   {due(d_daily)}",
