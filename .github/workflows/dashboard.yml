@@ -2,8 +2,9 @@ name: MacroSage SHORT dashboard
 
 on:
   schedule:
-    # 12:00 UTC, Monday-Friday (pre-open weekdays)
-    - cron: "0 12 * * 1-5"
+    # 22:00 UTC, Monday-Friday = after the US market close
+    # (4pm ET close + buffer). Friday's run lands Saturday morning AU time.
+    - cron: "0 22 * * 1-5"
   workflow_dispatch:
 
 jobs:
