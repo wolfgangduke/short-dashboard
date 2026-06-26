@@ -17,7 +17,8 @@ Two gates, both must pass to fire INITIATE SHORT (else WATCHING):
 
 Result is emailed (color-coded HTML) to EMAIL_TO via Gmail SMTP.
 
-Data sources: yfinance + FRED + a light Wikipedia scrape. No MCP.
+Data sources: FMP (constituents) + yfinance (closes) + FRED + Wikipedia
+fallback. No MCP.
 
 Required environment variables:
   FRED_API_KEY    FRED API key
@@ -46,6 +47,7 @@ USER_AGENT = (
 )
 
 WIKI_SP500_URL = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
+FMP_SP500_URL = "https://financialmodelingprep.com/stable/sp500-constituent"
 FRED_OBS_URL = "https://api.stlouisfed.org/fred/series/observations"
 
 BREADTH_THRESHOLD = 50.0   # percent
@@ -55,15 +57,37 @@ LOOKBACK_CLOSES = 3        # number of recent closes / prints to test
 # --------------------------------------------------------------------------
 # Breadth gate
 # --------------------------------------------------------------------------
-def get_sp500_tickers():
-    """Light-scrape the S&P 500 constituent list from Wikipedia."""
+def _tickers_from_fmp():
+    """Primary source: Financial Modeling Prep S&P 500 constituents."""
+    key = os.environ.get("FMP_API_KEY", "").strip()
+    if not key:
+        return None
+    r = requests.get(FMP_SP500_URL, params={"apikey": key}, timeout=60)
+    r.raise_for_status()
+    data = r.json()
+    syms = [d["symbol"].strip() for d in data if d.get("symbol")]
+    return syms or None
+
+
+def _tickers_from_wikipedia():
+    """Fallback source: light-scrape the constituent list from Wikipedia."""
     resp = requests.get(WIKI_SP500_URL, headers={"User-Agent": USER_AGENT}, timeout=60)
     resp.raise_for_status()
-    tables = pd.read_html(StringIO(resp.text))
-    df = tables[0]
-    tickers = df["Symbol"].astype(str).str.strip().tolist()
-    # yfinance uses '-' where Wikipedia uses '.' (e.g. BRK.B -> BRK-B)
-    return [t.replace(".", "-") for t in tickers]
+    df = pd.read_html(StringIO(resp.text))[0]
+    return df["Symbol"].astype(str).str.strip().tolist()
+
+
+def get_sp500_tickers():
+    """S&P 500 tickers from FMP, falling back to Wikipedia on any failure."""
+    try:
+        syms = _tickers_from_fmp()
+    except Exception as e:
+        print(f"FMP constituent fetch failed ({e}); using Wikipedia.", file=sys.stderr)
+        syms = None
+    if not syms:
+        syms = _tickers_from_wikipedia()
+    # yfinance uses '-' where some sources use '.' (e.g. BRK.B -> BRK-B)
+    return [s.replace(".", "-") for s in syms]
 
 
 def compute_breadth(tickers):
