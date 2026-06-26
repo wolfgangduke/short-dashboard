@@ -23,8 +23,11 @@ jobs:
 
       - name: Run dashboard
         env:
-          FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
-          EMAIL_ADDRESS: ${{ secrets.EMAIL_ADDRESS }}
-          EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
-          EMAIL_TO: ${{ secrets.EMAIL_TO }}
+          # Mapped to the repo secret names that actually exist:
+          #   FRED -> FRED_API_KEY, GMAIL_USER -> EMAIL_ADDRESS,
+          #   GMAIL_APP_PASSWORD -> EMAIL_PASSWORD, MAIL_TO -> EMAIL_TO
+          FRED_API_KEY: ${{ secrets.FRED }}
+          EMAIL_ADDRESS: ${{ secrets.GMAIL_USER }}
+          EMAIL_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          EMAIL_TO: ${{ secrets.MAIL_TO }}
         run: python short_dashboard_email.py
