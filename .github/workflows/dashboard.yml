@@ -19,17 +19,10 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install dependencies
-        run: pip install -r requirements.txt
-
       - name: Run dashboard
         env:
-          # Mapped to the repo secret names that actually exist:
-          #   FRED -> FRED_API_KEY, GMAIL_USER -> EMAIL_ADDRESS,
-          #   GMAIL_APP_PASSWORD -> EMAIL_PASSWORD, MAIL_TO -> EMAIL_TO
           FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
           FRED_API_KEY: ${{ secrets.FRED }}
-          EMAIL_ADDRESS: ${{ secrets.GMAIL_USER }}
-          EMAIL_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
-          EMAIL_TO: ${{ secrets.MAIL_TO }}
-        run: python short_dashboard_email.py
+          GMAIL_USER: ${{ secrets.GMAIL_USER }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+        run: python short_dashboard.py
