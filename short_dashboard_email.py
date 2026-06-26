@@ -149,8 +149,8 @@ def liquidity_gate(api_key):
 # Email
 # --------------------------------------------------------------------------
 def send_email(subject, body):
-    sender = os.environ["EMAIL_ADDRESS"]
-    password = os.environ["EMAIL_PASSWORD"]
+    sender = os.environ["EMAIL_ADDRESS"].strip()
+    password = os.environ["EMAIL_PASSWORD"].strip()
     recipients = [a.strip() for a in os.environ["EMAIL_TO"].split(",") if a.strip()]
 
     msg = MIMEText(body)
@@ -169,7 +169,7 @@ def send_email(subject, body):
 # --------------------------------------------------------------------------
 def main():
     today = dt.date.today().isoformat()
-    fred_key = os.environ["FRED_API_KEY"]
+    fred_key = os.environ["FRED_API_KEY"].strip()
 
     breadth_pass, breadth_vals, breadth_detail = breadth_gate()
     liq_pass, liq_vals, liq_detail = liquidity_gate(fred_key)
