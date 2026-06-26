@@ -232,7 +232,7 @@ def build_text(today, signal, b_pass, b_rows, l_pass, l_rows):
         f"MacroSage SHORT dashboard -- {today}\n"
         f"{'=' * 50}\n\n"
         f"SIGNAL: {signal}\n\n"
-        f"{block('Gate 1 -- Breadth (% S&P 500 > 200-DMA, need <%.0f%%)' % BREADTH_THRESHOLD, b_pass, b_rows)}\n\n"
+        f"{block(f'Gate 1 -- Breadth (% S&P 500 > 200-DMA, need <{BREADTH_THRESHOLD:.0f}%)', b_pass, b_rows)}\n\n"
         f"{block('Gate 2 -- Liquidity (net liq declining)', l_pass, l_rows)}\n\n"
         f"Rule: INITIATE SHORT only when BOTH gates PASS, else WATCHING.\n"
     )
