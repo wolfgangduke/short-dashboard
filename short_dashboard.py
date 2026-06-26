@@ -38,6 +38,33 @@ def get_json(url, timeout=15):
     except Exception as e:
         return None, str(e)
 
+UA_HDR = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+          "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"}
+
+def get_json_hdr(url, timeout=15):
+    try:
+        req = urllib.request.Request(url, headers=UA_HDR)
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return json.loads(r.read().decode()), None
+    except Exception as e:
+        return None, str(e)
+
+def yahoo_closes(symbol, n=6):
+    url = "https://query1.finance.yahoo.com/v8/finance/chart/%s?range=10d&interval=1d" % symbol
+    d, _ = get_json_hdr(url)
+    try:
+        q = d["chart"]["result"][0]["indicators"]["quote"][0]["close"]
+        return [c for c in q if c is not None][-n:]
+    except Exception:
+        return None
+
+def cot_emini():
+    url = ("https://publicreporting.cftc.gov/resource/gpe5-46if.json"
+           "?$where=upper(contract_market_name)%20like%20'%25E-MINI%20S%26P%20500%25'"
+           "&$order=report_date_as_yyyy_mm_dd%20DESC&$limit=1")
+    d, _ = get_json_hdr(url)
+    return d[0] if isinstance(d, list) and d else None
+
 def fmp(path):
     sep = "&" if "?" in path else "?"
     return get_json("https://financialmodelingprep.com/stable/%s%sapikey=%s" % (path, sep, FMP))
@@ -214,8 +241,30 @@ p.append(("7. Market breadth",
 p.append(("8. Net liquidity",
           netliq_dir if netliq_dir else "unavailable",
           ("red" if netliq_dir == "declining" else ("green" if netliq_dir == "rising" else "gray"))))
-p.append(("9. Positioning (COT)", "Premium-gated", "gray"))
-p.append(("10. VVIX divergence", "Premium-gated", "gray"))
+# point 9: COT positioning - CFTC public data (free, official, weekly)
+cot_sub, cot_col = "no data", "gray"
+_cot = cot_emini()
+if _cot:
+    try:
+        amL = float(_cot["asset_mgr_positions_long"]); amS = float(_cot["asset_mgr_positions_short"])
+        levL = float(_cot["lev_money_positions_long"]); levS = float(_cot["lev_money_positions_short"])
+        dL = float(_cot["change_in_lev_money_long"]); dS = float(_cot["change_in_lev_money_short"])
+        am_net = amL - amS; lev_net = levL - levS; lev_chg = dL - dS
+        cot_col = "red" if lev_chg <= -20000 else ("green" if lev_chg >= 20000 else "amber")
+        cot_sub = "Lev net %+.0fk (%+.0fk WoW); AM net %+.0fk" % (lev_net/1000, lev_chg/1000, am_net/1000)
+    except Exception:
+        cot_sub, cot_col = "parse error", "gray"
+
+# point 10: VVIX divergence - Yahoo Finance (free)
+vvix_sub, vvix_col = "no data", "gray"
+_vv = yahoo_closes("%5EVVIX"); _vx = yahoo_closes("%5EVIX")
+if _vv and _vx and len(_vv) >= 2 and len(_vx) >= 2:
+    vvix = _vv[-1]; vvc = (vvix/_vv[-2]-1)*100; vxc = (_vx[-1]/_vx[-2]-1)*100
+    vvix_col = "red" if (vvc >= 3 and vxc <= 1) else ("green" if vvc <= -2 else "amber")
+    vvix_sub = "VVIX %.0f (%+.1f%%) vs VIX %+.1f%%" % (vvix, vvc, vxc)
+
+p.append(("9. Positioning (COT)", cot_sub, cot_col))
+p.append(("10. VVIX divergence", vvix_sub, vvix_col))
 p.append(("11. Sector rotation",
           ("defensive tilt" if breadth_red else "broad") if breadth is not None else "unavailable",
           ("red" if breadth_red else ("green" if breadth is not None else "gray"))))
