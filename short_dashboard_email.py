@@ -132,7 +132,7 @@ def liquidity_gate(api_key):
     df = pd.concat([walcl, tga, rrp], axis=1).sort_index().ffill().dropna()
     # WALCL is in $millions; WTREGEN ($billions) and RRPONTSYD ($billions)
     # are converted to $millions so the subtraction is on a common unit.
-    net = df["WALCL"] - df["WTREGEN"] * 1000.0 - df["RRPONTSYD"] * 1000.0
+    net = df["WALCL"] - df["WTREGEN"] - df["RRPONTSYD"] * 1000.0
     net = net.dropna()
 
     last = net.tail(LOOKBACK_CLOSES)
@@ -150,7 +150,7 @@ def liquidity_gate(api_key):
 # --------------------------------------------------------------------------
 def send_email(subject, body):
     sender = os.environ["EMAIL_ADDRESS"].strip()
-    password = os.environ["EMAIL_PASSWORD"].strip()
+    password = "".join(os.environ["EMAIL_PASSWORD"].split())
     recipients = [a.strip() for a in os.environ["EMAIL_TO"].split(",") if a.strip()]
 
     msg = MIMEText(body)
