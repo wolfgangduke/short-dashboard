@@ -30,11 +30,19 @@ import os
 import sys
 import smtplib
 import datetime as dt
+from io import StringIO
 from email.mime.text import MIMEText
 
 import requests
 import pandas as pd
 import yfinance as yf
+
+# A browser-like User-Agent: Wikipedia returns HTTP 403 to the bare
+# urllib agent that pandas.read_html uses by default.
+USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+)
 
 WIKI_SP500_URL = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
 FRED_OBS_URL = "https://api.stlouisfed.org/fred/series/observations"
@@ -48,7 +56,9 @@ LOOKBACK_CLOSES = 3        # number of recent closes / prints to test
 # --------------------------------------------------------------------------
 def get_sp500_tickers():
     """Light-scrape the S&P 500 constituent list from Wikipedia."""
-    tables = pd.read_html(WIKI_SP500_URL)
+    resp = requests.get(WIKI_SP500_URL, headers={"User-Agent": USER_AGENT}, timeout=60)
+    resp.raise_for_status()
+    tables = pd.read_html(StringIO(resp.text))
     df = tables[0]
     tickers = df["Symbol"].astype(str).str.strip().tolist()
     # yfinance uses '-' where Wikipedia uses '.' (e.g. BRK.B -> BRK-B)
