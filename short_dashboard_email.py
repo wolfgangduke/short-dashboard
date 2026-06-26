@@ -1,151 +1,189 @@
 #!/usr/bin/env python3
 """
-SHORT — Macro Dashboard (cloud / GitHub Actions edition)
-========================================================
-Keyless data (yfinance + FRED public CSV). Emails the dashboard via Gmail SMTP.
-Runs unattended on GitHub Actions — your PC does not need to be on.
+MacroSage SHORT dashboard.
 
-Required environment variables (set as GitHub repo Secrets):
-  GMAIL_USER          e.g. wolfgangduke@gmail.com
-  GMAIL_APP_PASSWORD  16-char Google App Password (NOT your normal password)
-  MAIL_TO             comma-separated recipients
+Two gates, both must pass to fire INITIATE SHORT (else WATCHING):
 
-If email creds are absent it just prints the report (handy for local testing).
+  1. Breadth gate  -- % of S&P 500 constituents above their own 200-day
+     moving average must be BELOW 50% for each of the last 3 closes.
+     ($S5TH is not available via yfinance, so the constituent list is
+     light-scraped from Wikipedia and the breadth figure is computed
+     from per-name closes pulled via yfinance.)
+
+  2. Liquidity gate -- net liquidity = WALCL - WTREGEN - RRPONTSYD
+     (Fed balance sheet minus Treasury General Account minus Reverse
+     Repo), pulled from the FRED API, must be DECLINING across the
+     last 3 prints.
+
+Result is emailed to EMAIL_TO via Gmail SMTP.
+
+Data sources: yfinance + FRED + a light Wikipedia scrape. No MCP.
+
+Required environment variables:
+  FRED_API_KEY    FRED API key
+  EMAIL_ADDRESS   Gmail address used to send (SMTP login)
+  EMAIL_PASSWORD  Gmail App Password (not the normal password)
+  EMAIL_TO        comma-separated recipient list
 """
-import io, os, csv, ssl, json, smtplib, datetime as dt, urllib.request
+
+import os
+import sys
+import smtplib
+import datetime as dt
 from email.mime.text import MIMEText
 
-SECTOR_ETFS = ["XLB","XLC","XLY","XLP","XLE","XLF","XLV","XLI","XLRE","XLK","XLU"]
-UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
-FOMC_2026 = ["2026-01-28","2026-03-18","2026-04-29","2026-06-17",
-             "2026-07-29","2026-09-16","2026-10-28","2026-12-09"]
+import requests
+import pandas as pd
+import yfinance as yf
+
+WIKI_SP500_URL = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
+FRED_OBS_URL = "https://api.stlouisfed.org/fred/series/observations"
+
+BREADTH_THRESHOLD = 50.0   # percent
+LOOKBACK_CLOSES = 3        # number of recent closes / prints to test
 
 
-def next_weekday(today, wd):
-    return today + dt.timedelta(days=(wd - today.weekday() - 1) % 7 + 1)
-def next_business_day(today):
-    d = today + dt.timedelta(days=1)
-    while d.weekday() >= 5: d += dt.timedelta(days=1)
-    return d
-def next_quarter_start(today):
-    qm = ((today.month - 1)//3 + 1)*3 + 1
-    y = today.year + (1 if qm > 12 else 0); qm = 1 if qm > 12 else qm
-    return dt.date(y, qm, 1)
-def due(d): return f"(next due {d:%a %d %b})"
+# --------------------------------------------------------------------------
+# Breadth gate
+# --------------------------------------------------------------------------
+def get_sp500_tickers():
+    """Light-scrape the S&P 500 constituent list from Wikipedia."""
+    tables = pd.read_html(WIKI_SP500_URL)
+    df = tables[0]
+    tickers = df["Symbol"].astype(str).str.strip().tolist()
+    # yfinance uses '-' where Wikipedia uses '.' (e.g. BRK.B -> BRK-B)
+    return [t.replace(".", "-") for t in tickers]
 
 
-def fred_csv(series, n=400):
-    url = f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={series}"
-    raw = urllib.request.urlopen(url, timeout=25).read().decode()   # no UA: FRED CDN dislikes it
-    out = []
-    for d, v in list(csv.reader(io.StringIO(raw)))[1:]:
-        if v not in (".", ""):
-            try: out.append((d, float(v)))
-            except ValueError: pass
-    return out[-n:]
+def compute_breadth(tickers):
+    """
+    Return a pandas Series (indexed by date) giving the % of constituents
+    trading above their own 200-day moving average, for recent dates.
+    """
+    data = yf.download(
+        tickers,
+        period="1y",
+        interval="1d",
+        auto_adjust=True,
+        progress=False,
+        threads=True,
+    )
+    close = data["Close"]
+    if isinstance(close, pd.Series):          # single-ticker edge case
+        close = close.to_frame()
 
-def net_liquidity():
-    walcl, tga, rrp = dict(fred_csv("WALCL")), dict(fred_csv("WTREGEN")), dict(fred_csv("RRPONTSYD"))
-    s = [(d, w/1000.0 - tga[d]/1000.0 - rrp[d]) for d, w in sorted(walcl.items()) if d in tga and d in rrp]
-    recent = s[-3:]
-    return recent, (len(recent) == 3 and recent[0][1] > recent[1][1] > recent[2][1])
+    ma200 = close.rolling(window=200, min_periods=200).mean()
+    above = close > ma200                      # bool DataFrame
 
-def treasury_2s10s():
-    y2, y10 = fred_csv("DGS2")[-1][1], fred_csv("DGS10")[-1][1]
-    return y2, y10, round((y10 - y2) * 100)
-
-def hy_oas(): return fred_csv("BAMLH0A0HYM2")[-1]
-
-def quotes():
-    """Batched download + retry. Single-symbol calls get throttled on CI IPs;
-    one batched request (like breadth) is far more reliable."""
-    import yfinance as yf, time
-    syms = ["^GSPC","^VIX","^VVIX","HG=F","GC=F"]
-    out = {s: None for s in syms}
-    for attempt in range(3):
-        try:
-            df = yf.download(syms, period="5d", progress=False, threads=False)["Close"].dropna(how="all")
-            if len(df):
-                last = df.tail(1).iloc[0]
-                for s in syms:
-                    v = last.get(s)
-                    if v is not None and v == v:   # not NaN
-                        out[s] = float(v)
-            if all(out[s] is not None for s in syms):
-                break
-        except Exception:
-            pass
-        time.sleep(2)
-    return out
-
-def breadth_3day():
-    import yfinance as yf
-    px = yf.download(SECTOR_ETFS, period="7d", progress=False, threads=False)["Close"].dropna()
-    pct = px.pct_change().dropna()
-    days = [(str(dte.date()), int((row > 0).sum()), round(100*int((row > 0).sum())/len(SECTOR_ETFS)))
-            for dte, row in pct.tail(3).iterrows()]
-    return days, (len(days) == 3 and all(d[2] < 50 for d in days))
-
-def fear_greed():
-    try:
-        url = "https://production.dataviz.cnn.io/index/fearandgreed/graphdata"
-        d = json.load(urllib.request.urlopen(urllib.request.Request(url, headers=UA), timeout=15))
-        fg = d["fear_and_greed"]; return round(float(fg["score"])), fg.get("rating")
-    except Exception as e:
-        return None, f"blocked ({getattr(e,'code',type(e).__name__)})"
-
-def naaim():
-    try:
-        import re
-        url = "https://naaim.org/programs/naaim-exposure-index/"
-        h = urllib.request.urlopen(urllib.request.Request(url, headers=UA), timeout=20).read().decode("utf-8","ignore")
-        m = re.search(r'NAAIM (?:Number|Exposure Index)[^0-9\-]{0,40}(-?\d{1,3}\.\d{1,2})', h)
-        return float(m.group(1)) if m else None
-    except Exception:
-        return None
-
-def calendar_gate(today):
-    fomc = next((d for d in FOMC_2026 if 0 <= (dt.date.fromisoformat(d) - today).days <= 5), None)
-    first = today.replace(day=1)
-    fri = [first + dt.timedelta(days=i) for i in range(31)
-           if (first + dt.timedelta(days=i)).month == today.month and (first + dt.timedelta(days=i)).weekday() == 4]
-    opex = fri[2]
-    return fomc, opex, (opex if 0 <= (opex - today).days <= 3 else None)
+    # Only count names that actually have a 200-DMA on a given day.
+    valid = ma200.notna()
+    pct_above = (above & valid).sum(axis=1) / valid.sum(axis=1) * 100.0
+    return pct_above.dropna()
 
 
-def build_report():
-    today = dt.date.today()
-    q = quotes(); nl_recent, nl_decl = net_liquidity()
-    y2, y10, spread = treasury_2s10s(); hy_d, hy_v = hy_oas()
-    bdays, breadth_3x = breadth_3day(); fg_score, fg_rating = fear_greed(); naaim_v = naaim()
-    fomc_hit, opex, opex_hit = calendar_gate(today)
-    d_daily, d_netliq = next_business_day(today), next_weekday(today, 3)
-    d_naaim, d_cot, d_struct = next_weekday(today, 2), next_weekday(today, 4), next_quarter_start(today)
+def breadth_gate():
+    tickers = get_sp500_tickers()
+    pct = compute_breadth(tickers)
+    last = pct.tail(LOOKBACK_CLOSES)
+    passed = len(last) == LOOKBACK_CLOSES and bool((last < BREADTH_THRESHOLD).all())
+    detail = ", ".join(
+        f"{idx.date()}: {val:.1f}%" for idx, val in last.items()
+    )
+    return passed, last, detail
 
-    primary = "INITIATE SHORT" if (breadth_3x and nl_decl) else f"WATCHING — Day {sum(1 for d in bdays if d[2] < 50)} of 3"
-    layer2 = "CALENDAR GATE" if (fomc_hit or opex_hit) else "WAIT"
-    if layer2 == "CALENDAR GATE":
-        bottom = "NO TRADE — calendar gate (FOMC/OpEx)"
-    elif primary == "INITIATE SHORT":
-        bottom = "SHORT — conditions met"
-    else:
-        bottom = "NO TRADE — stay flat"
 
-    def f2(x):
-        return f"{x:,.2f}" if isinstance(x, (int, float)) else "n/a"
-    L = ["SHORT — MACRO DASHBOARD", f"{today:%d %b %Y}  (cloud build)", "",
-         f">>> BOTTOM LINE: {bottom} <<<", "",
-         f"PRIMARY VERDICT: {primary}", f"LAYER 2 VERDICT: {layer2}", "", "--- LIVE (auto) ---",
-         f"SPX:   {f2(q['^GSPC'])}    {due(d_daily)}",
-         f"VIX:   {f2(q['^VIX'])}   VVIX: {f2(q['^VVIX'])}   {due(d_daily)}"]
-    if q['HG=F'] and q['GC=F']:
-        L.append(f"Copper/Gold: {q['HG=F']/q['GC=F']:.5f}  (Cu {q['HG=F']:.2f}/Au {q['GC=F']:.0f})  {due(d_daily)}")
-    L += [f"HY OAS (credit): {hy_v:.2f}%  [{hy_d}]   {due(d_daily)}",
-          f"2s10s: {spread} bps (2Y {y2}/10Y {y10}) {'INVERTED' if spread<0 else 'positive'}  {due(d_daily)}",
-          "", f"Net Liquidity (WALCL-TGA-RRP, $bn)   {due(d_netliq)}"]
-    L += [f"   {d}: {v:,.0f}" for d, v in nl_recent]
-    L += [f"   declining 3 prints: {nl_decl}", "", f"Breadth (sector ETFs advancing)   {due(d_daily)}"]
-    L += [f"   {d}: {adv}/11 = {pct}%" for d, adv, pct in bdays]
-    L += [f"   <50% for 3 closes: {breadth_3x}", "", "--- SENTIMENT (scrape w/ fallback) ---"]
-    L.append(f"Fear & Greed: {fg_score} ({fg_rating})   {due(d_daily)}" if fg_score is not None
-             else f"Fear & Greed:
+# --------------------------------------------------------------------------
+# Liquidity gate
+# --------------------------------------------------------------------------
+def fred_series(series_id, api_key):
+    params = {
+        "series_id": series_id,
+        "api_key": api_key,
+        "file_type": "json",
+        "observation_start": "2022-01-01",
+    }
+    r = requests.get(FRED_OBS_URL, params=params, timeout=60)
+    r.raise_for_status()
+    obs = r.json()["observations"]
+    idx, vals = [], []
+    for o in obs:
+        if o["value"] in (".", "", None):
+            continue
+        idx.append(pd.to_datetime(o["date"]))
+        vals.append(float(o["value"]))
+    return pd.Series(vals, index=idx, name=series_id).sort_index()
+
+
+def liquidity_gate(api_key):
+    walcl = fred_series("WALCL", api_key)        # Fed balance sheet
+    tga = fred_series("WTREGEN", api_key)        # Treasury General Account
+    rrp = fred_series("RRPONTSYD", api_key)      # Overnight reverse repo
+
+    df = pd.concat([walcl, tga, rrp], axis=1).sort_index().ffill().dropna()
+    # WALCL is in $millions; WTREGEN ($billions) and RRPONTSYD ($billions)
+    # are converted to $millions so the subtraction is on a common unit.
+    net = df["WALCL"] - df["WTREGEN"] * 1000.0 - df["RRPONTSYD"] * 1000.0
+    net = net.dropna()
+
+    last = net.tail(LOOKBACK_CLOSES)
+    passed = len(last) == LOOKBACK_CLOSES and bool(
+        all(last.iloc[i] < last.iloc[i - 1] for i in range(1, len(last)))
+    )
+    detail = ", ".join(
+        f"{idx.date()}: ${val/1e6:.3f}T" for idx, val in last.items()
+    )
+    return passed, last, detail
+
+
+# --------------------------------------------------------------------------
+# Email
+# --------------------------------------------------------------------------
+def send_email(subject, body):
+    sender = os.environ["EMAIL_ADDRESS"]
+    password = os.environ["EMAIL_PASSWORD"]
+    recipients = [a.strip() for a in os.environ["EMAIL_TO"].split(",") if a.strip()]
+
+    msg = MIMEText(body)
+    msg["Subject"] = subject
+    msg["From"] = sender
+    msg["To"] = ", ".join(recipients)
+
+    with smtplib.SMTP("smtp.gmail.com", 587) as server:
+        server.starttls()
+        server.login(sender, password)
+        server.sendmail(sender, recipients, msg.as_string())
+
+
+# --------------------------------------------------------------------------
+# Main
+# --------------------------------------------------------------------------
+def main():
+    today = dt.date.today().isoformat()
+    fred_key = os.environ["FRED_API_KEY"]
+
+    breadth_pass, breadth_vals, breadth_detail = breadth_gate()
+    liq_pass, liq_vals, liq_detail = liquidity_gate(fred_key)
+
+    signal = "INITIATE SHORT" if (breadth_pass and liq_pass) else "WATCHING"
+
+    body = (
+        f"MacroSage SHORT dashboard -- {today}\n"
+        f"==================================================\n\n"
+        f"SIGNAL: {signal}\n\n"
+        f"Gate 1 -- Breadth (% S&P 500 > 200-DMA, need <{BREADTH_THRESHOLD:.0f}% "
+        f"for last {LOOKBACK_CLOSES} closes)\n"
+        f"  Status : {'PASS' if breadth_pass else 'FAIL'}\n"
+        f"  Last {LOOKBACK_CLOSES}: {breadth_detail}\n\n"
+        f"Gate 2 -- Liquidity (net liq = WALCL - WTREGEN - RRPONTSYD, "
+        f"need declining for last {LOOKBACK_CLOSES} prints)\n"
+        f"  Status : {'PASS' if liq_pass else 'FAIL'}\n"
+        f"  Last {LOOKBACK_CLOSES}: {liq_detail}\n\n"
+        f"Rule: INITIATE SHORT only when BOTH gates PASS, else WATCHING.\n"
+    )
+
+    print(body)
+    send_email(f"MacroSage SHORT {signal} -- {today}", body)
+
+
+if __name__ == "__main__":
+    sys.exit(main())
