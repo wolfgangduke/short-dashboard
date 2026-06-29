@@ -1,13 +1,31 @@
 name: MacroSage SHORT dashboard
 
+# ---------------------------------------------------------------------------
+# Triggers
+#   * workflow_dispatch: lets you run it on demand from the Actions tab.
+#   * schedule: 22:00 UTC, Monday-Friday. 22:00 UTC is ~17:00-18:00 New York
+#     time (after the 16:00 US market close, in both winter EST and summer EDT)
+#     and ~06:00 the next morning in Perth (AWST = UTC+8). Running Mon-Fri UTC
+#     lines up with US trading days. GitHub cron is ALWAYS in UTC.
+# ---------------------------------------------------------------------------
 on:
-  workflow_dispatch:  # keeps the manual trigger too
-    schedule:
-            - cron: '0 23 * * 0-4'  # 11pm UTC Sun-Thu = 7am AWST Mon-Fri
+  workflow_dispatch:
+  schedule:
+    - cron: '0 22 * * 1-5'
+
+# Allow the run to commit state.json (the last-known-value cache) back to the repo.
+permissions:
+  contents: write
+
+# Never let two runs overlap (prevents racing on the state.json commit).
+concurrency:
+  group: short-dashboard
+  cancel-in-progress: false
 
 jobs:
   run-dashboard:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -17,10 +35,39 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Verify dependencies and compile
+        run: |
+          python -m pip install --upgrade pip
+          if grep -qE '^[^#[:space:]]' requirements.txt; then
+            echo "Installing pinned dependencies..."
+            pip install -r requirements.txt
+          else
+            echo "No third-party dependencies (Python standard library only)."
+          fi
+          python -m py_compile short_dashboard.py
+          echo "Syntax/compile check passed."
+
       - name: Run dashboard
         env:
+          PYTHONUTF8: "1"
+          PYTHONIOENCODING: "utf-8"
           FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
           FRED_API_KEY: ${{ secrets.FRED }}
           GMAIL_USER: ${{ secrets.GMAIL_USER }}
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          MAIL_TO: ${{ secrets.MAIL_TO }}
         run: python short_dashboard.py
+
+      - name: Persist last-known values (state.json)
+        if: always()
+        run: |
+          if [ -n "$(git status --porcelain state.json)" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add state.json
+            git commit -m "chore: update last-known market values [skip ci]"
+            git push
+            echo "state.json updated and pushed."
+          else
+            echo "No change to state.json; nothing to commit."
+          fi
