@@ -143,14 +143,25 @@ def sector_chg(s):
 
 breadth = None; up = down = 0
 if sectors and isinstance(sectors, list):
-    for s in sectors:
-        c = sector_chg(s)
-        if c is None:
-            continue
-        if c >= 0: up += 1
-        else: down += 1
-    if up + down:
-        breadth = round(up / (up + down) * 100)
+        for s in sectors:
+                    c = sector_chg(s)
+                    if c is None:
+                                    continue
+                                if c >= 0: up += 1
+                    else: down += 1
+                            if up + down:
+                                        breadth = round(up / (up + down) * 100)
+                                # fallback: Yahoo Finance advance/decline if FMP sectors unavailable
+if breadth is None:
+    try:
+        _adv = yahoo_closes("%5EADVN", 1)
+        _dec = yahoo_closes("%5EDECN", 1)
+        if _adv and _dec and _adv[0] and _dec[0]:
+                        up = int(_adv[0]); down = int(_dec[0])
+                        if up + down:
+                                            breadth = round(up / (up + down) * 100)
+    except Exception:
+                pass
 
 netliq_dir = None
 if netliq:
