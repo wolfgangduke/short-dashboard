@@ -1,1 +1,11 @@
-# MacroSage engine uses only the Python standard library
+# MacroSage SHORT dashboard - dependencies
+#
+# This project intentionally uses ONLY the Python standard library
+# (urllib, json, smtplib, ssl, logging, datetime, calendar, email).
+# There are no third-party packages to install, so there are no version
+# pins to drift or break. The workflow still runs a compile check before
+# every run to catch syntax errors early.
+#
+# If a third-party package is ever added, pin it here with == so the
+# scheduled run is reproducible, e.g.:
+#   requests==2.32.3
