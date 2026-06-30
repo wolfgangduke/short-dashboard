@@ -876,7 +876,7 @@ if vvix_sub == "no data":
 
 
 # ---- McClellan Oscillator / NYMO (mcoscillator.com) ----
-nymo_sub, nymo_col = "manual — https://www.mcoscillator.com/market_breadth_data/ (next: daily)"
+nymo_sub, nymo_col = "manual — https://www.mcoscillator.com/market_breadth_data/ (next: daily)", "gray"
 _nymo_result = compute_nymo(CACHE)
 if _nymo_result and _nymo_result.get("nymo") is not None:
     _nymo = _nymo_result["nymo"]
