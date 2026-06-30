@@ -331,43 +331,99 @@ def _re_first(pattern, text, cast=float, default=None):
 
 def fetch_ad_series(n=60):
     """Fetch NYSE advancing/declining issues as a net-advances series.
-    Primary  : FMP /stable/historical-price-full/%5EADVN (authenticated, historical).
-    Secondary: Yahoo Finance v7 download CSV (401 on GitHub Actions, kept as dead code marker).
-    Tertiary : Finviz homepage HTML (today only, resets pre-market; all-US proxy).
-    Returns  : list of net_adv (int) oldest-first, or None on total failure.
-    # DEAD: yahoo v8 chart API 404s on ^ADVN/^DECN.
-    # DEAD: yahoo v7 download 401s (requires session auth) from server environments.
+    Primary  : Stooq CSV ^ADVN / ^DECN (free, no auth, 200+ sessions, oldest-first).
+    Secondary: FMP v3 historical-price-full (auth required, legacy endpoint, supports
+               index symbols; /stable/ endpoint 404s on ^ADVN - flagged dead below).
+    Tertiary : Finviz homepage HTML (today only; PRE-MARKET RETURNS 0/0 -> rejected).
+    # DEAD: FMP /stable/historical-price-full/%5EADVN -> HTTP 404 for index symbols.
+    # DEAD: Yahoo v8 chart API 404s on ^ADVN/^DECN.
+    # DEAD: Yahoo v7 download 401s (requires session auth) from server environments.
+    Returns  : list of net_adv (int) oldest-first, >=40 sessions on success, or None.
+    Logs WARNING and returns None if all sources fail — caller uses last-known cache.
     """
-    import time as _time, datetime as _dt
-    t_end = _dt.date.today()
-    t_start = t_end - _dt.timedelta(days=n * 2)   # 2x buffer for weekends
+    import datetime as _dt
 
-    # --- Primary: FMP /stable/historical-price-full/ (uses existing FMP key) ---
+    t_end = _dt.date.today()
+    t_start = t_end - _dt.timedelta(days=n * 2)  # 2x buffer for weekends/holidays
+
+    # --- Primary: Stooq CSV (free, no auth, returns 200+ daily sessions) ---
+    # URL: https://stooq.com/q/d/l/?s=<symbol>&i=d
+    # Response: CSV with header Date,Open,High,Low,Close,Volume, newest-first.
+    try:
+        def _stooq_closes(symbol):
+            url = ("https://stooq.com/q/d/l/?s=%s&i=d&d1=%s&d2=%s"
+                   % (symbol,
+                      t_start.strftime("%Y%m%d"),
+                      t_end.strftime("%Y%m%d")))
+            text, err = _http_get_text(url, timeout=20)
+            if not text:
+                log.warning("NYMO A/D Stooq %s: fetch failed (%s)", symbol, err)
+                return None
+            lines = text.strip().splitlines()
+            if len(lines) < 2 or not lines[0].startswith("Date"):
+                log.warning("NYMO A/D Stooq %s: unexpected format, first line=%r",
+                            symbol, lines[0] if lines else "")
+                return None
+            closes = []
+            for row in reversed(lines[1:]):  # Stooq newest-first -> reverse to oldest-first
+                parts = row.split(",")
+                if len(parts) >= 5:
+                    try:
+                        closes.append(int(float(parts[4])))  # Close column
+                    except (ValueError, IndexError):
+                        pass
+            return closes if closes else None
+
+        adv = _stooq_closes("%5Eadvn")
+        dec = _stooq_closes("%5Edecn")
+        if adv and dec:
+            min_len = min(len(adv), len(dec))
+            if min_len >= 10:  # sanity: at least 2 weeks
+                series = [a - d for a, d in zip(adv[:min_len], dec[:min_len])]
+                log.info("NYMO A/D: Stooq ^ADVN/^DECN, %d sessions (adv=%d, dec=%d)",
+                         len(series), len(adv), len(dec))
+                return series[-n:]
+            log.warning("NYMO A/D Stooq: too few rows adv=%d dec=%d", len(adv), len(dec))
+        else:
+            log.warning("NYMO A/D Stooq: adv=%s dec=%s",
+                        "ok" if adv else "None", "ok" if dec else "None")
+    except Exception as ex:
+        log.warning("NYMO A/D Stooq error: %s", ex)
+
+    # --- Secondary: FMP v3 (legacy, not /stable/) supports index symbols ---
+    # NOTE: /stable/historical-price-full/%5EADVN returns HTTP 404. Use /api/v3/.
     if FMP:
         try:
-            adv_d, _ = fmp("historical-price-full/%%5EADVN?from=%s&to=%s"
-                           % (t_start, t_end))
-            dec_d, _ = fmp("historical-price-full/%%5EDECN?from=%s&to=%s"
-                           % (t_start, t_end))
-            def _fmp_closes(d):
-                hist = (d or {}).get("historical", [])
+            def _fmp_v3_closes(sym):
+                url = ("https://financialmodelingprep.com/api/v3/historical-price-full/%s"
+                       "?timeseries=%d&apikey=%s" % (sym, n * 2, FMP))
+                d, err = http_get_json(url)
+                if not d:
+                    log.warning("NYMO A/D FMP v3 %s: %s", sym, err)
+                    return None
+                hist = d.get("historical", [])
                 # FMP returns newest-first; reverse to oldest-first
                 return [int(float(r["close"])) for r in reversed(hist)
-                        if r.get("close") is not None]
-            adv = _fmp_closes(adv_d)
-            dec = _fmp_closes(dec_d)
-            if adv and dec and len(adv) == len(dec):
-                series = [a - d for a, d in zip(adv, dec)]
-                log.info("NYMO A/D: FMP historical, %d sessions", len(series))
-                return series[-n:]
-            log.warning("NYMO A/D FMP: row mismatch adv=%d dec=%d", len(adv), len(dec))
-        except Exception as ex:
-            log.warning("NYMO A/D FMP error: %s", ex)
-    else:
-        log.warning("NYMO A/D FMP: no FMP key configured")
+                        if r.get("close") is not None] or None
 
-    # --- Tertiary: Finviz homepage HTML (today only; all-US market proxy) ---
-    # NOTE: resets to 0/0 before market opens each day.
+            adv = _fmp_v3_closes("%5EADVN")
+            dec = _fmp_v3_closes("%5EDECN")
+            if adv and dec:
+                min_len = min(len(adv), len(dec))
+                if min_len >= 10:
+                    series = [a - d for a, d in zip(adv[:min_len], dec[:min_len])]
+                    log.info("NYMO A/D: FMP v3 ^ADVN/^DECN, %d sessions", len(series))
+                    return series[-n:]
+                log.warning("NYMO A/D FMP v3: too few rows adv=%d dec=%d",
+                            len(adv) if adv else 0, len(dec) if dec else 0)
+        except Exception as ex:
+            log.warning("NYMO A/D FMP v3 error: %s", ex)
+    else:
+        log.warning("NYMO A/D: no FMP key (skipping v3 secondary)")
+
+    # --- Tertiary: Finviz homepage HTML (TODAY ONLY; PRE-MARKET returns 0/0) ---
+    # WARNING: This path returns a single-session series. NYMO will be warm=True.
+    # The pre-market 0/0 guard below prevents seeding EMAs with garbage.
     try:
         fv_html, _ = _http_get_text("https://finviz.com/")
         if fv_html:
@@ -376,16 +432,20 @@ def fetch_ad_series(n=60):
             dec_m = _re.search(r'Declining[^(]*\((\d+)\)', fv_html, _re.DOTALL)
             if adv_m and dec_m:
                 adv_n, dec_n = int(adv_m.group(1)), int(dec_m.group(1))
-                if adv_n > 0 or dec_n > 0:   # skip pre-market 0/0
+                if adv_n > 0 or dec_n > 0:  # reject pre-market 0/0
                     net = adv_n - dec_n
-                    log.info("NYMO A/D: Finviz today (all-US proxy), net=%d", net)
+                    log.info("NYMO A/D: Finviz today-only fallback (all-US proxy), "
+                             "net=%d — Stooq+FMP both failed; NYMO warm=True", net)
                     return [net]
-                log.warning("NYMO A/D Finviz: pre-market 0/0, skipping")
+                log.warning("NYMO A/D Finviz: pre-market 0/0 rejected")
+            else:
+                log.warning("NYMO A/D Finviz: pattern not found in page")
         else:
-            log.warning("NYMO A/D Finviz: fetch returned None")
+            log.warning("NYMO A/D Finviz: fetch failed")
     except Exception as ex:
-        log.warning("NYMO A/D Finviz fallback error: %s", ex)
+        log.warning("NYMO A/D Finviz error: %s", ex)
 
+    log.warning("NYMO A/D: ALL sources failed (Stooq, FMP v3, Finviz) — NYMO will use cache")
     return None
 
 
@@ -414,6 +474,8 @@ def compute_nymo(cache):
             ema19 = net_adv * mult19 + ema19 * (1 - mult19)
             ema39 = net_adv * mult39 + ema39 * (1 - mult39)
         warming_up = len(series) < 39
+        if not warming_up:
+            cache.set("nymo_warmed", 1.0, RUN_TS)  # persist: once warm stays warm
     elif prev19 is None:
         # First run, today-only data: seed and flag warming up
         ema19 = ema39 = float(series[-1])
@@ -422,8 +484,9 @@ def compute_nymo(cache):
         net_adv = series[-1]
         ema19 = net_adv * mult19 + prev19 * (1 - mult19)
         ema39 = net_adv * mult39 + prev39 * (1 - mult39)
-        age19 = cache.get_age_days("nymo_ema19")
-        warming_up = (age19 is None or age19 < 39)
+        # Once fully warmed by historical backfill, stay warmed forever.
+        # nymo_warmed cached as 1.0 (True) / absent (False) in state.json.
+        warming_up = not bool(cache.get("nymo_warmed"))
 
     cache.set("nymo_ema19", round(ema19, 4), RUN_TS)
     cache.set("nymo_ema39", round(ema39, 4), RUN_TS)
@@ -1272,7 +1335,7 @@ if __name__ == "__main__":
 
     email_ok = False
     try:
-        email_ok = send_email()
+        email_ok = send_email()h
     except Exception as ex:
         log.error("EMAIL ERROR (unhandled): %s", ex)
 
