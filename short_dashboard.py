@@ -327,80 +327,77 @@ def _re_first(pattern, text, cast=float, default=None):
         return default
 
 
-def fetch_nymo():
-    """Scrape current NYMO from mcoscillator.com.
-    Returns {"nymo": float} or None on failure.
-    NOTE: site serves JS-rendered content; plain HTTP fetch unlikely to
-    return the live number → keep manual fallback.
-    """
-    text, err = _http_get_text(
-        "https://www.mcoscillator.com/market_breadth_data/",
-        timeout=20,
-    )
-    if not text:
-        log.warning("NYMO scrape error: %s", err)
-        return None
-    import re as _re
-    # Look for NYMO value in page - several possible table patterns
-    patterns = [
-        r'NYMO[^<>]{0,80}>([-+]?\d+\.?\d*)<',
-        r'NYSE McClellan Oscillator[^<>]{0,200}>([-+]?\d+\.?\d*)<',
-        r'id=[A-Za-z"]*nymo[A-Za-z"]*[^>]*>([-+]?\d+\.?\d*)<',
-    ]
-    for pat in patterns:
-        m = _re.search(pat, text, _re.IGNORECASE)
-        if m:
-            try:
-                val = float(m.group(1))
-                if -500 <= val <= 500:
-                    log.info("NYMO live = %.2f", val)
-                    return {"nymo": val}
-            except Exception:
-                pass
-    log.warning("NYMO: page fetched (%d chars) but value not parseable", len(text))
-    return None
 
+
+def compute_nymo(cache):
+    """Self-compute NYMO = EMA19(net_adv) - EMA39(net_adv) using NYSE A/D.
+    Persists nymo_ema19, nymo_ema39 in state.json across runs.
+    Returns {"nymo": float, "warming_up": bool} or None on data failure.
+    """
+    try:
+        _adv = yahoo_closes("%5EADVN", 1)
+        _dec = yahoo_closes("%5EDECN", 1)
+        if not _adv or not _dec or not _adv[0] or not _dec[0]:
+            log.warning("NYMO compute: A/D data unavailable")
+            return None
+        net_adv = int(_adv[0]) - int(_dec[0])
+    except Exception as ex:
+        log.warning("NYMO compute: A/D fetch error: %s", ex)
+        return None
+
+    mult19 = 2.0 / (19 + 1)
+    mult39 = 2.0 / (39 + 1)
+
+    prev19 = cache.get("nymo_ema19")
+    prev39 = cache.get("nymo_ema39")
+
+    # Seed on first run, or advance EMAs
+    if prev19 is None:
+        ema19 = float(net_adv)
+        ema39 = float(net_adv)
+        warming_up = True
+    else:
+        ema19 = net_adv * mult19 + prev19 * (1 - mult19)
+        ema39 = net_adv * mult39 + prev39 * (1 - mult39)
+        # Flag warming up until at least 39 sessions of history exist
+        age19 = cache.get_age_days("nymo_ema19")
+        warming_up = (age19 is None or age19 < 39)
+
+    cache.set("nymo_ema19", round(ema19, 4), RUN_TS)
+    cache.set("nymo_ema39", round(ema39, 4), RUN_TS)
+
+    nymo = round(ema19 - ema39, 2)
+    log.info("NYMO computed = %.2f (net_adv=%d, ema19=%.2f, ema39=%.2f, warm=%s)",
+             nymo, net_adv, ema19, ema39, warming_up)
+    return {"nymo": nymo, "warming_up": warming_up}
 
 def fetch_naaim():
-    """Fetch latest NAAIM Exposure Index from naaim.org JSON or page.
+    """Fetch latest NAAIM Exposure Index by scraping the HTML table on naaim.org.
+    The table is server-rendered (no JS needed). Rows: MM/DD/YYYY | value | ...
     Returns {"naaim": float} or None on failure.
     """
-    # NAAIM publishes a simple JSON endpoint
-    data, err = http_get_json(
-        "https://www.naaim.org/wp-content/uploads/naaim-exposure-data.json",
-        headers=UA_HDR, timeout=20,
+    text, err = _http_get_text(
+        "https://naaim.org/programs/naaim-exposure-index/",
+        timeout=25,
     )
-    if isinstance(data, list) and data:
-        # Format: [{date, exposed_average, ...}, ...] sorted desc or asc
-        # Find the most recent entry
-        for rec in data:
-            val = None
-            for k in ("exposed_average", "naaim", "average", "mean"):
-                if k in rec:
-                    try:
-                        val = float(rec[k])
-                    except Exception:
-                        pass
-                    if val is not None:
-                        break
-            if val is not None and 0 <= val <= 200:
-                log.info("NAAIM live = %.1f", val)
+    if not text:
+        log.warning("NAAIM: page fetch failed (%s)", err)
+        return None
+    import re as _re
+    # Match first table row with MM/DD/YYYY date and float value
+    m = _re.search(
+        r'(\d{2}/\d{2}/\d{4})</td>\s*<td>([\d.]+)</td>',
+        text
+    )
+    if m:
+        try:
+            val = float(m.group(2))
+            if 0 <= val <= 200:
+                log.info("NAAIM live = %.1f (dated %s)", val, m.group(1))
                 return {"naaim": val}
-    # Fallback: scrape the page
-    text, err2 = _http_get_text("https://www.naaim.org/programs/naaim-exposure-index/", timeout=20)
-    if text:
-        import re as _re
-        # Look for "Exposure Index: XX.X" or numeric in a table near NAAIM header
-        m = _re.search(r'(?:Exposure Index|NAAIM)[^<>]{0,60}>(\d+\.?\d*)<', text, _re.IGNORECASE)
-        if m:
-            try:
-                val = float(m.group(1))
-                if 0 <= val <= 200:
-                    log.info("NAAIM (scraped) = %.1f", val)
-                    return {"naaim": val}
-            except Exception:
-                pass
-    log.warning("NAAIM: all fetches failed (%s / %s)", err, err2)
+        except Exception:
+            pass
+    log.warning("NAAIM: page fetched (%d chars) but table not parseable", len(text))
     return None
 
 
@@ -879,25 +876,28 @@ if vvix_sub == "no data":
 
 
 # ---- McClellan Oscillator / NYMO (mcoscillator.com) ----
-nymo_sub, nymo_col = "manual — https://www.mcoscillator.com/market_breadth_data/ (check weekly)", "gray"
-_nymo_live = fetch_nymo()
-if _nymo_live and _nymo_live.get("nymo") is not None:
-    _nymo = _nymo_live["nymo"]
-    nymo_sub = "NYMO %.1f (%s)" % (_nymo, "above zero" if _nymo >= 0 else "BELOW ZERO")
+nymo_sub, nymo_col = "manual — https://www.mcoscillator.com/market_breadth_data/ (next: daily)"
+_nymo_result = compute_nymo(CACHE)
+if _nymo_result and _nymo_result.get("nymo") is not None:
+    _nymo = _nymo_result["nymo"]
+    _warm = _nymo_result.get("warming_up", False)
+    _label = "above zero" if _nymo >= 0 else "below zero"
+    _warm_tag = " ⚠ warming up (<39d)" if _warm else ""
+    nymo_sub = "NYMO %.1f (%s)%s" % (_nymo, _label, _warm_tag)
     nymo_col = "green" if _nymo >= 0 else "red"
     CACHE.set("nymo", _nymo, RUN_TS)
-    log.info("NYMO live = %.2f", _nymo)
+    log.info("NYMO tile = %.2f (warm=%s)", _nymo, _warm)
 else:
     _nymo_cached = CACHE.get("nymo")
     if _nymo_cached is not None:
         nymo_sub = "NYMO %.1f (last known)" % _nymo_cached
         nymo_col = "green" if _nymo_cached >= 0 else "red"
-        log.warning("NYMO: using cache (%.2f)", _nymo_cached)
+        log.warning("NYMO: A/D unavailable, using cache (%.2f)", _nymo_cached)
     # else stays as manual fallback label above
 mcclellan_divergence = (
     nymo_col == "red" and spy_px is not None
-    # divergence = NYMO negative while SPX near highs — coarse check
-    # A more precise check would compare to a 52W high; here we flag whenever below zero
+    # divergence = NYMO negative while SPX near highs
+    # A more precise check would compare to a 52W high; this is a proxy
 )
 
 # ---- NAAIM Exposure Index (naaim.org) ----
