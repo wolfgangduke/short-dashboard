@@ -1335,7 +1335,7 @@ if __name__ == "__main__":
 
     email_ok = False
     try:
-        email_ok = send_email()h
+        email_ok = send_email()
     except Exception as ex:
         log.error("EMAIL ERROR (unhandled): %s", ex)
 
