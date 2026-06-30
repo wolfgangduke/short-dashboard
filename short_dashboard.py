@@ -345,7 +345,7 @@ def fetch_nymo():
     patterns = [
         r'NYMO[^<>]{0,80}>([-+]?\d+\.?\d*)<',
         r'NYSE McClellan Oscillator[^<>]{0,200}>([-+]?\d+\.?\d*)<',
-        r'id=["']nymo["'][^>]*>([-+]?\d+\.?\d*)<',
+        r'id=[A-Za-z"]*nymo[A-Za-z"]*[^>]*>([-+]?\d+\.?\d*)<',
     ]
     for pat in patterns:
         m = _re.search(pat, text, _re.IGNORECASE)
