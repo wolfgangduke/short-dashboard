@@ -808,7 +808,7 @@ _cot_stale = False
 if _cot and "report_date_as_yyyy_mm_dd" in _cot:
     try:
         import datetime as _dt2
-        _cot_date = _dt2.datetime.strptime(_cot["report_date_as_yyyy_mm_dd"], "%Y-%m-%d").date()
+        _cot_date = _dt2.datetime.strptime(_cot["report_date_as_yyyy_mm_dd"].split("T")[0], "%Y-%m-%d").date()
         if (_utcnow().date() - _cot_date).days > 10:
             log.warning("COT CFTC data is stale (%d days old); trying Tradingster fallback",
                         (_utcnow().date() - _cot_date).days)
