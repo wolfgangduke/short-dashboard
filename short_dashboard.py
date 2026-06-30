@@ -329,20 +329,73 @@ def _re_first(pattern, text, cast=float, default=None):
 
 
 
+def fetch_ad_series(n=60):
+    """Fetch NYSE advancing/declining issues as a net-advances series.
+    Primary  : Yahoo Finance v7 download CSV (historical, up to n sessions).
+    Fallback : Finviz homepage HTML (today only; all-US market proxy, labelled).
+    Returns  : list of net_adv (int) oldest-first, or None on total failure.
+    NOTE     : Yahoo v8 chart API 404s on ^ADVN/^DECN; v7 download is tried instead.
+    """
+    import time as _time
+    t2 = int(_time.time())
+    t1 = t2 - n * 86400 * 2          # 2x buffer for weekends/holidays
+    base = ("https://query1.finance.yahoo.com/v7/finance/download/"
+            "%s?period1=%d&period2=%d&interval=1d&events=history")
+
+    # --- Primary: Yahoo v7 download CSV (historical) ---
+    try:
+        adv_txt, _ = _http_get_text(base % ("%5EADVN", t1, t2))
+        dec_txt, _ = _http_get_text(base % ("%5EDECN", t1, t2))
+        if adv_txt and dec_txt:
+            def _csv_closes(txt):
+                out = []
+                for row in txt.strip().splitlines()[1:]:    # skip header
+                    cols = row.split(",")
+                    try:
+                        out.append(int(float(cols[4])))     # Close column
+                    except (IndexError, ValueError):
+                        pass
+                return out
+            adv = _csv_closes(adv_txt)
+            dec = _csv_closes(dec_txt)
+            if adv and dec and len(adv) == len(dec):
+                series = [a - d for a, d in zip(adv, dec)]
+                log.info("NYMO A/D: Yahoo v7 CSV, %d sessions", len(series))
+                return series[-n:]
+            log.warning("NYMO A/D Yahoo v7: row mismatch adv=%d dec=%d", len(adv), len(dec))
+        else:
+            log.warning("NYMO A/D Yahoo v7: one or both fetches returned None")
+    except Exception as ex:
+        log.warning("NYMO A/D Yahoo v7 error: %s", ex)
+
+    # --- Fallback: Finviz homepage HTML (today only; all-US market proxy) ---
+    try:
+        fv_html, _ = _http_get_text("https://finviz.com/")
+        if fv_html:
+            import re as _re
+            adv_m = _re.search(r'Advancing[^(]*\((\d+)\)', fv_html, _re.DOTALL)
+            dec_m = _re.search(r'Declining[^(]*\((\d+)\)', fv_html, _re.DOTALL)
+            if adv_m and dec_m:
+                net = int(adv_m.group(1)) - int(dec_m.group(1))
+                log.info("NYMO A/D: Finviz today (all-US proxy), net=%d", net)
+                return [net]
+        log.warning("NYMO A/D Finviz: could not parse advancing/declining")
+    except Exception as ex:
+        log.warning("NYMO A/D Finviz fallback error: %s", ex)
+
+    return None
+
+
 def compute_nymo(cache):
-    """Self-compute NYMO = EMA19(net_adv) - EMA39(net_adv) using NYSE A/D.
+    """Self-compute NYMO = EMA19(net_adv) - EMA39(net_adv).
+    Fetches A/D series via fetch_ad_series().
+    With historical data (>=2 sessions) backfills EMAs immediately.
     Persists nymo_ema19, nymo_ema39 in state.json across runs.
     Returns {"nymo": float, "warming_up": bool} or None on data failure.
     """
-    try:
-        _adv = yahoo_closes("%5EADVN", 1)
-        _dec = yahoo_closes("%5EDECN", 1)
-        if not _adv or not _dec or not _adv[0] or not _dec[0]:
-            log.warning("NYMO compute: A/D data unavailable")
-            return None
-        net_adv = int(_adv[0]) - int(_dec[0])
-    except Exception as ex:
-        log.warning("NYMO compute: A/D fetch error: %s", ex)
+    series = fetch_ad_series(60)
+    if not series:
+        log.warning("NYMO compute: A/D data unavailable")
         return None
 
     mult19 = 2.0 / (19 + 1)
@@ -351,15 +404,21 @@ def compute_nymo(cache):
     prev19 = cache.get("nymo_ema19")
     prev39 = cache.get("nymo_ema39")
 
-    # Seed on first run, or advance EMAs
-    if prev19 is None:
-        ema19 = float(net_adv)
-        ema39 = float(net_adv)
+    if prev19 is None and len(series) > 1:
+        # Backfill EMAs from historical series (seed from first session)
+        ema19 = ema39 = float(series[0])
+        for net_adv in series[1:]:
+            ema19 = net_adv * mult19 + ema19 * (1 - mult19)
+            ema39 = net_adv * mult39 + ema39 * (1 - mult39)
+        warming_up = len(series) < 39
+    elif prev19 is None:
+        # First run, today-only data: seed and flag warming up
+        ema19 = ema39 = float(series[-1])
         warming_up = True
     else:
+        net_adv = series[-1]
         ema19 = net_adv * mult19 + prev19 * (1 - mult19)
         ema39 = net_adv * mult39 + prev39 * (1 - mult39)
-        # Flag warming up until at least 39 sessions of history exist
         age19 = cache.get_age_days("nymo_ema19")
         warming_up = (age19 is None or age19 < 39)
 
@@ -367,8 +426,8 @@ def compute_nymo(cache):
     cache.set("nymo_ema39", round(ema39, 4), RUN_TS)
 
     nymo = round(ema19 - ema39, 2)
-    log.info("NYMO computed = %.2f (net_adv=%d, ema19=%.2f, ema39=%.2f, warm=%s)",
-             nymo, net_adv, ema19, ema39, warming_up)
+    log.info("NYMO computed = %.2f (ema19=%.2f, ema39=%.2f, warm=%s, sessions=%d)",
+             nymo, ema19, ema39, warming_up, len(series))
     return {"nymo": nymo, "warming_up": warming_up}
 
 def fetch_naaim():
