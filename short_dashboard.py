@@ -331,44 +331,43 @@ def _re_first(pattern, text, cast=float, default=None):
 
 def fetch_ad_series(n=60):
     """Fetch NYSE advancing/declining issues as a net-advances series.
-    Primary  : Yahoo Finance v7 download CSV (historical, up to n sessions).
-    Fallback : Finviz homepage HTML (today only; all-US market proxy, labelled).
+    Primary  : FMP /stable/historical-price-full/%5EADVN (authenticated, historical).
+    Secondary: Yahoo Finance v7 download CSV (401 on GitHub Actions, kept as dead code marker).
+    Tertiary : Finviz homepage HTML (today only, resets pre-market; all-US proxy).
     Returns  : list of net_adv (int) oldest-first, or None on total failure.
-    NOTE     : Yahoo v8 chart API 404s on ^ADVN/^DECN; v7 download is tried instead.
+    # DEAD: yahoo v8 chart API 404s on ^ADVN/^DECN.
+    # DEAD: yahoo v7 download 401s (requires session auth) from server environments.
     """
-    import time as _time
-    t2 = int(_time.time())
-    t1 = t2 - n * 86400 * 2          # 2x buffer for weekends/holidays
-    base = ("https://query1.finance.yahoo.com/v7/finance/download/"
-            "%s?period1=%d&period2=%d&interval=1d&events=history")
+    import time as _time, datetime as _dt
+    t_end = _dt.date.today()
+    t_start = t_end - _dt.timedelta(days=n * 2)   # 2x buffer for weekends
 
-    # --- Primary: Yahoo v7 download CSV (historical) ---
-    try:
-        adv_txt, _ = _http_get_text(base % ("%5EADVN", t1, t2))
-        dec_txt, _ = _http_get_text(base % ("%5EDECN", t1, t2))
-        if adv_txt and dec_txt:
-            def _csv_closes(txt):
-                out = []
-                for row in txt.strip().splitlines()[1:]:    # skip header
-                    cols = row.split(",")
-                    try:
-                        out.append(int(float(cols[4])))     # Close column
-                    except (IndexError, ValueError):
-                        pass
-                return out
-            adv = _csv_closes(adv_txt)
-            dec = _csv_closes(dec_txt)
+    # --- Primary: FMP /stable/historical-price-full/ (uses existing FMP key) ---
+    if FMP:
+        try:
+            adv_d, _ = fmp("historical-price-full/%%5EADVN?from=%s&to=%s"
+                           % (t_start, t_end))
+            dec_d, _ = fmp("historical-price-full/%%5EDECN?from=%s&to=%s"
+                           % (t_start, t_end))
+            def _fmp_closes(d):
+                hist = (d or {}).get("historical", [])
+                # FMP returns newest-first; reverse to oldest-first
+                return [int(float(r["close"])) for r in reversed(hist)
+                        if r.get("close") is not None]
+            adv = _fmp_closes(adv_d)
+            dec = _fmp_closes(dec_d)
             if adv and dec and len(adv) == len(dec):
                 series = [a - d for a, d in zip(adv, dec)]
-                log.info("NYMO A/D: Yahoo v7 CSV, %d sessions", len(series))
+                log.info("NYMO A/D: FMP historical, %d sessions", len(series))
                 return series[-n:]
-            log.warning("NYMO A/D Yahoo v7: row mismatch adv=%d dec=%d", len(adv), len(dec))
-        else:
-            log.warning("NYMO A/D Yahoo v7: one or both fetches returned None")
-    except Exception as ex:
-        log.warning("NYMO A/D Yahoo v7 error: %s", ex)
+            log.warning("NYMO A/D FMP: row mismatch adv=%d dec=%d", len(adv), len(dec))
+        except Exception as ex:
+            log.warning("NYMO A/D FMP error: %s", ex)
+    else:
+        log.warning("NYMO A/D FMP: no FMP key configured")
 
-    # --- Fallback: Finviz homepage HTML (today only; all-US market proxy) ---
+    # --- Tertiary: Finviz homepage HTML (today only; all-US market proxy) ---
+    # NOTE: resets to 0/0 before market opens each day.
     try:
         fv_html, _ = _http_get_text("https://finviz.com/")
         if fv_html:
@@ -376,10 +375,14 @@ def fetch_ad_series(n=60):
             adv_m = _re.search(r'Advancing[^(]*\((\d+)\)', fv_html, _re.DOTALL)
             dec_m = _re.search(r'Declining[^(]*\((\d+)\)', fv_html, _re.DOTALL)
             if adv_m and dec_m:
-                net = int(adv_m.group(1)) - int(dec_m.group(1))
-                log.info("NYMO A/D: Finviz today (all-US proxy), net=%d", net)
-                return [net]
-        log.warning("NYMO A/D Finviz: could not parse advancing/declining")
+                adv_n, dec_n = int(adv_m.group(1)), int(dec_m.group(1))
+                if adv_n > 0 or dec_n > 0:   # skip pre-market 0/0
+                    net = adv_n - dec_n
+                    log.info("NYMO A/D: Finviz today (all-US proxy), net=%d", net)
+                    return [net]
+                log.warning("NYMO A/D Finviz: pre-market 0/0, skipping")
+        else:
+            log.warning("NYMO A/D Finviz: fetch returned None")
     except Exception as ex:
         log.warning("NYMO A/D Finviz fallback error: %s", ex)
 
