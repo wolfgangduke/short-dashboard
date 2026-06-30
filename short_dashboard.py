@@ -346,29 +346,7 @@ def fetch_ad_series(n=60):
     t_end = _dt.date.today()
     t_start = t_end - _dt.timedelta(days=n * 2)  # 2x buffer for weekends/holidays
 
-    # --- Primary: FMP /stable/historical-market-breadth (authenticated, stable tier) ---
-        # Uses existing FMP key. Returns json list of daily breadth, newest-first.
-        # NOTE: /stable/historical-price-full/%5EADVN HTTP 404; FMP v3 historical HTTP 403.
-        if FMP:
-            try:
-                d, err = fmp("historical-market-breadth?exchange=NYSE&limit=%d" % (n * 2))
-                if d and isinstance(d, list) and len(d) >= 10:
-                    adv = [int(float(r.get("advancingIssues", 0) or 0)) for r in reversed(d)]
-                    dec = [int(float(r.get("decliningIssues", 0) or 0)) for r in reversed(d)]
-                    if any(a > 0 for a in adv) and any(x > 0 for x in dec):
-                        series = [a - x for a, x in zip(adv, dec)]
-                        log.info("NYMO A/D: FMP stable market-breadth (NYSE), %d sessions", len(series))
-                        return series[-n:]
-                    log.warning("NYMO A/D FMP stable breadth: all-zero rows; skipping")
-                elif err:
-                    log.warning("NYMO A/D FMP stable breadth unavailable: %s", err)
-                else:
-                    log.warning("NYMO A/D FMP stable breadth: empty/plan-gated; falling through")
-            except Exception as ex:
-                log.warning("NYMO A/D FMP stable breadth error: %s", ex)
-
-        # --- Secondary: Stooq CSV (free, no auth) — NOTE: JS/Cloudflare challenge blocks
-        #     plain urllib from server environments; kept as best-effort secondary.
+    # --- Primary: Stooq CSV (free, no auth, returns 200+ daily sessions) ---
     # URL: https://stooq.com/q/d/l/?s=<symbol>&i=d
     # Response: CSV with header Date,Open,High,Low,Close,Volume, newest-first.
     try:
