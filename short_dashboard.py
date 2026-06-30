@@ -327,80 +327,202 @@ def _re_first(pattern, text, cast=float, default=None):
         return default
 
 
-def fetch_nymo():
-    """Scrape current NYMO from mcoscillator.com.
-    Returns {"nymo": float} or None on failure.
-    NOTE: site serves JS-rendered content; plain HTTP fetch unlikely to
-    return the live number → keep manual fallback.
+
+
+def fetch_ad_series(n=60):
+    """Fetch NYSE advancing/declining issues as a net-advances series.
+    Primary  : Stooq CSV ^ADVN / ^DECN (free, no auth, 200+ sessions, oldest-first).
+    Secondary: FMP v3 historical-price-full (auth required, legacy endpoint, supports
+               index symbols; /stable/ endpoint 404s on ^ADVN - flagged dead below).
+    Tertiary : Finviz homepage HTML (today only; PRE-MARKET RETURNS 0/0 -> rejected).
+    # DEAD: FMP /stable/historical-price-full/%5EADVN -> HTTP 404 for index symbols.
+    # DEAD: Yahoo v8 chart API 404s on ^ADVN/^DECN.
+    # DEAD: Yahoo v7 download 401s (requires session auth) from server environments.
+    Returns  : list of net_adv (int) oldest-first, >=40 sessions on success, or None.
+    Logs WARNING and returns None if all sources fail — caller uses last-known cache.
     """
-    text, err = _http_get_text(
-        "https://www.mcoscillator.com/market_breadth_data/",
-        timeout=20,
-    )
-    if not text:
-        log.warning("NYMO scrape error: %s", err)
-        return None
-    import re as _re
-    # Look for NYMO value in page - several possible table patterns
-    patterns = [
-        r'NYMO[^<>]{0,80}>([-+]?\d+\.?\d*)<',
-        r'NYSE McClellan Oscillator[^<>]{0,200}>([-+]?\d+\.?\d*)<',
-        r'id=[A-Za-z"]*nymo[A-Za-z"]*[^>]*>([-+]?\d+\.?\d*)<',
-    ]
-    for pat in patterns:
-        m = _re.search(pat, text, _re.IGNORECASE)
-        if m:
-            try:
-                val = float(m.group(1))
-                if -500 <= val <= 500:
-                    log.info("NYMO live = %.2f", val)
-                    return {"nymo": val}
-            except Exception:
-                pass
-    log.warning("NYMO: page fetched (%d chars) but value not parseable", len(text))
+    import datetime as _dt
+
+    t_end = _dt.date.today()
+    t_start = t_end - _dt.timedelta(days=n * 2)  # 2x buffer for weekends/holidays
+
+    # --- Primary: Stooq CSV (free, no auth, returns 200+ daily sessions) ---
+    # URL: https://stooq.com/q/d/l/?s=<symbol>&i=d
+    # Response: CSV with header Date,Open,High,Low,Close,Volume, newest-first.
+    try:
+        def _stooq_closes(symbol):
+            url = ("https://stooq.com/q/d/l/?s=%s&i=d&d1=%s&d2=%s"
+                   % (symbol,
+                      t_start.strftime("%Y%m%d"),
+                      t_end.strftime("%Y%m%d")))
+            text, err = _http_get_text(url, timeout=20)
+            if not text:
+                log.warning("NYMO A/D Stooq %s: fetch failed (%s)", symbol, err)
+                return None
+            lines = text.strip().splitlines()
+            if len(lines) < 2 or not lines[0].startswith("Date"):
+                log.warning("NYMO A/D Stooq %s: unexpected format, first line=%r",
+                            symbol, lines[0] if lines else "")
+                return None
+            closes = []
+            for row in reversed(lines[1:]):  # Stooq newest-first -> reverse to oldest-first
+                parts = row.split(",")
+                if len(parts) >= 5:
+                    try:
+                        closes.append(int(float(parts[4])))  # Close column
+                    except (ValueError, IndexError):
+                        pass
+            return closes if closes else None
+
+        adv = _stooq_closes("%5Eadvn")
+        dec = _stooq_closes("%5Edecn")
+        if adv and dec:
+            min_len = min(len(adv), len(dec))
+            if min_len >= 10:  # sanity: at least 2 weeks
+                series = [a - d for a, d in zip(adv[:min_len], dec[:min_len])]
+                log.info("NYMO A/D: Stooq ^ADVN/^DECN, %d sessions (adv=%d, dec=%d)",
+                         len(series), len(adv), len(dec))
+                return series[-n:]
+            log.warning("NYMO A/D Stooq: too few rows adv=%d dec=%d", len(adv), len(dec))
+        else:
+            log.warning("NYMO A/D Stooq: adv=%s dec=%s",
+                        "ok" if adv else "None", "ok" if dec else "None")
+    except Exception as ex:
+        log.warning("NYMO A/D Stooq error: %s", ex)
+
+    # --- Secondary: FMP v3 (legacy, not /stable/) supports index symbols ---
+    # NOTE: /stable/historical-price-full/%5EADVN returns HTTP 404. Use /api/v3/.
+    if FMP:
+        try:
+            def _fmp_v3_closes(sym):
+                url = ("https://financialmodelingprep.com/api/v3/historical-price-full/%s"
+                       "?timeseries=%d&apikey=%s" % (sym, n * 2, FMP))
+                d, err = http_get_json(url)
+                if not d:
+                    log.warning("NYMO A/D FMP v3 %s: %s", sym, err)
+                    return None
+                hist = d.get("historical", [])
+                # FMP returns newest-first; reverse to oldest-first
+                return [int(float(r["close"])) for r in reversed(hist)
+                        if r.get("close") is not None] or None
+
+            adv = _fmp_v3_closes("%5EADVN")
+            dec = _fmp_v3_closes("%5EDECN")
+            if adv and dec:
+                min_len = min(len(adv), len(dec))
+                if min_len >= 10:
+                    series = [a - d for a, d in zip(adv[:min_len], dec[:min_len])]
+                    log.info("NYMO A/D: FMP v3 ^ADVN/^DECN, %d sessions", len(series))
+                    return series[-n:]
+                log.warning("NYMO A/D FMP v3: too few rows adv=%d dec=%d",
+                            len(adv) if adv else 0, len(dec) if dec else 0)
+        except Exception as ex:
+            log.warning("NYMO A/D FMP v3 error: %s", ex)
+    else:
+        log.warning("NYMO A/D: no FMP key (skipping v3 secondary)")
+
+    # --- Tertiary: Finviz homepage HTML (TODAY ONLY; PRE-MARKET returns 0/0) ---
+    # WARNING: This path returns a single-session series. NYMO will be warm=True.
+    # The pre-market 0/0 guard below prevents seeding EMAs with garbage.
+    try:
+        fv_html, _ = _http_get_text("https://finviz.com/")
+        if fv_html:
+            import re as _re
+            adv_m = _re.search(r'Advancing[^(]*\((\d+)\)', fv_html, _re.DOTALL)
+            dec_m = _re.search(r'Declining[^(]*\((\d+)\)', fv_html, _re.DOTALL)
+            if adv_m and dec_m:
+                adv_n, dec_n = int(adv_m.group(1)), int(dec_m.group(1))
+                if adv_n > 0 or dec_n > 0:  # reject pre-market 0/0
+                    net = adv_n - dec_n
+                    log.info("NYMO A/D: Finviz today-only fallback (all-US proxy), "
+                             "net=%d — Stooq+FMP both failed; NYMO warm=True", net)
+                    return [net]
+                log.warning("NYMO A/D Finviz: pre-market 0/0 rejected")
+            else:
+                log.warning("NYMO A/D Finviz: pattern not found in page")
+        else:
+            log.warning("NYMO A/D Finviz: fetch failed")
+    except Exception as ex:
+        log.warning("NYMO A/D Finviz error: %s", ex)
+
+    log.warning("NYMO A/D: ALL sources failed (Stooq, FMP v3, Finviz) — NYMO will use cache")
     return None
 
 
+def compute_nymo(cache):
+    """Self-compute NYMO = EMA19(net_adv) - EMA39(net_adv).
+    Fetches A/D series via fetch_ad_series().
+    With historical data (>=2 sessions) backfills EMAs immediately.
+    Persists nymo_ema19, nymo_ema39 in state.json across runs.
+    Returns {"nymo": float, "warming_up": bool} or None on data failure.
+    """
+    series = fetch_ad_series(60)
+    if not series:
+        log.warning("NYMO compute: A/D data unavailable")
+        return None
+
+    mult19 = 2.0 / (19 + 1)
+    mult39 = 2.0 / (39 + 1)
+
+    prev19 = cache.get("nymo_ema19")
+    prev39 = cache.get("nymo_ema39")
+
+    if prev19 is None and len(series) > 1:
+        # Backfill EMAs from historical series (seed from first session)
+        ema19 = ema39 = float(series[0])
+        for net_adv in series[1:]:
+            ema19 = net_adv * mult19 + ema19 * (1 - mult19)
+            ema39 = net_adv * mult39 + ema39 * (1 - mult39)
+        warming_up = len(series) < 39
+        if not warming_up:
+            cache.set("nymo_warmed", 1.0, RUN_TS)  # persist: once warm stays warm
+    elif prev19 is None:
+        # First run, today-only data: seed and flag warming up
+        ema19 = ema39 = float(series[-1])
+        warming_up = True
+    else:
+        net_adv = series[-1]
+        ema19 = net_adv * mult19 + prev19 * (1 - mult19)
+        ema39 = net_adv * mult39 + prev39 * (1 - mult39)
+        # Once fully warmed by historical backfill, stay warmed forever.
+        # nymo_warmed cached as 1.0 (True) / absent (False) in state.json.
+        warming_up = not bool(cache.get("nymo_warmed"))
+
+    cache.set("nymo_ema19", round(ema19, 4), RUN_TS)
+    cache.set("nymo_ema39", round(ema39, 4), RUN_TS)
+
+    nymo = round(ema19 - ema39, 2)
+    log.info("NYMO computed = %.2f (ema19=%.2f, ema39=%.2f, warm=%s, sessions=%d)",
+             nymo, ema19, ema39, warming_up, len(series))
+    return {"nymo": nymo, "warming_up": warming_up}
+
 def fetch_naaim():
-    """Fetch latest NAAIM Exposure Index from naaim.org JSON or page.
+    """Fetch latest NAAIM Exposure Index by scraping the HTML table on naaim.org.
+    The table is server-rendered (no JS needed). Rows: MM/DD/YYYY | value | ...
     Returns {"naaim": float} or None on failure.
     """
-    # NAAIM publishes a simple JSON endpoint
-    data, err = http_get_json(
-        "https://www.naaim.org/wp-content/uploads/naaim-exposure-data.json",
-        headers=UA_HDR, timeout=20,
+    text, err = _http_get_text(
+        "https://naaim.org/programs/naaim-exposure-index/",
+        timeout=25,
     )
-    if isinstance(data, list) and data:
-        # Format: [{date, exposed_average, ...}, ...] sorted desc or asc
-        # Find the most recent entry
-        for rec in data:
-            val = None
-            for k in ("exposed_average", "naaim", "average", "mean"):
-                if k in rec:
-                    try:
-                        val = float(rec[k])
-                    except Exception:
-                        pass
-                    if val is not None:
-                        break
-            if val is not None and 0 <= val <= 200:
-                log.info("NAAIM live = %.1f", val)
+    if not text:
+        log.warning("NAAIM: page fetch failed (%s)", err)
+        return None
+    import re as _re
+    # Match first table row with MM/DD/YYYY date and float value
+    m = _re.search(
+        r'(\d{2}/\d{2}/\d{4})</td>\s*<td>([\d.]+)</td>',
+        text
+    )
+    if m:
+        try:
+            val = float(m.group(2))
+            if 0 <= val <= 200:
+                log.info("NAAIM live = %.1f (dated %s)", val, m.group(1))
                 return {"naaim": val}
-    # Fallback: scrape the page
-    text, err2 = _http_get_text("https://www.naaim.org/programs/naaim-exposure-index/", timeout=20)
-    if text:
-        import re as _re
-        # Look for "Exposure Index: XX.X" or numeric in a table near NAAIM header
-        m = _re.search(r'(?:Exposure Index|NAAIM)[^<>]{0,60}>(\d+\.?\d*)<', text, _re.IGNORECASE)
-        if m:
-            try:
-                val = float(m.group(1))
-                if 0 <= val <= 200:
-                    log.info("NAAIM (scraped) = %.1f", val)
-                    return {"naaim": val}
-            except Exception:
-                pass
-    log.warning("NAAIM: all fetches failed (%s / %s)", err, err2)
+        except Exception:
+            pass
+    log.warning("NAAIM: page fetched (%d chars) but table not parseable", len(text))
     return None
 
 
@@ -879,25 +1001,28 @@ if vvix_sub == "no data":
 
 
 # ---- McClellan Oscillator / NYMO (mcoscillator.com) ----
-nymo_sub, nymo_col = "manual — https://www.mcoscillator.com/market_breadth_data/ (check weekly)", "gray"
-_nymo_live = fetch_nymo()
-if _nymo_live and _nymo_live.get("nymo") is not None:
-    _nymo = _nymo_live["nymo"]
-    nymo_sub = "NYMO %.1f (%s)" % (_nymo, "above zero" if _nymo >= 0 else "BELOW ZERO")
+nymo_sub, nymo_col = "manual — https://www.mcoscillator.com/market_breadth_data/ (next: daily)", "gray"
+_nymo_result = compute_nymo(CACHE)
+if _nymo_result and _nymo_result.get("nymo") is not None:
+    _nymo = _nymo_result["nymo"]
+    _warm = _nymo_result.get("warming_up", False)
+    _label = "above zero" if _nymo >= 0 else "below zero"
+    _warm_tag = " ⚠ warming up (<39d)" if _warm else ""
+    nymo_sub = "NYMO %.1f (%s)%s" % (_nymo, _label, _warm_tag)
     nymo_col = "green" if _nymo >= 0 else "red"
     CACHE.set("nymo", _nymo, RUN_TS)
-    log.info("NYMO live = %.2f", _nymo)
+    log.info("NYMO tile = %.2f (warm=%s)", _nymo, _warm)
 else:
     _nymo_cached = CACHE.get("nymo")
     if _nymo_cached is not None:
         nymo_sub = "NYMO %.1f (last known)" % _nymo_cached
         nymo_col = "green" if _nymo_cached >= 0 else "red"
-        log.warning("NYMO: using cache (%.2f)", _nymo_cached)
+        log.warning("NYMO: A/D unavailable, using cache (%.2f)", _nymo_cached)
     # else stays as manual fallback label above
 mcclellan_divergence = (
     nymo_col == "red" and spy_px is not None
-    # divergence = NYMO negative while SPX near highs — coarse check
-    # A more precise check would compare to a 52W high; here we flag whenever below zero
+    # divergence = NYMO negative while SPX near highs
+    # A more precise check would compare to a 52W high; this is a proxy
 )
 
 # ---- NAAIM Exposure Index (naaim.org) ----
