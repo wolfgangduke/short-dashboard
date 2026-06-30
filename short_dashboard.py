@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """SHORT macro dashboard -> colored HTML email.
 
-Pulls live macro data (FMP /stable/, FRED, Yahoo Finance, CFTC), scores 13
+Pulls live macro data (FMP /stable/, FRED, Yahoo Finance, CFTC), scores 17
 indicator tiles, and emails a colour-coded dashboard to the recipients.
 
 Hardened 2026-06-29:
@@ -59,7 +59,7 @@ def _utcnow():
 HERE = os.path.dirname(os.path.abspath(__file__))
 STATE_PATH = os.path.join(HERE, "state.json")
 DEFAULT_RECIPIENTS = ["wolfgangduke@gmail.com", "richard.macrae.gordon@gmail.com"]
-TOTAL_TILES = 13  # number of indicator tiles the engine computes
+TOTAL_TILES = 17  # number of indicator tiles the engine computes
 
 # ---------------------------------------------------------------------------
 # Config / secrets
@@ -283,6 +283,233 @@ def cot_emini():
            "&$order=report_date_as_yyyy_mm_dd%20DESC&$limit=1")
     d, _ = http_get_json(url, headers=UA_HDR)
     return d[0] if isinstance(d, list) and d else None
+
+
+
+
+# ===========================================================================
+# LIVE INDICATOR FETCHERS  (live-indicators branch, 2026-06-30)
+# Each returns a dict with typed values on success, None on any failure so
+# the caller can gracefully fall back.
+# ===========================================================================
+
+def _http_get_text(url, headers=None, timeout=20, retries=2, backoff=1.5):
+    """Like http_get_json but returns raw text (for scraping)."""
+    last_err = None
+    safe = _redact(url)
+    hdrs = dict(UA_HDR)
+    if headers:
+        hdrs.update(headers)
+    for attempt in range(1, retries + 1):
+        try:
+            req = urllib.request.Request(url, headers=hdrs)
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                return r.read().decode("utf-8", "replace"), None
+        except Exception as e:
+            last_err = str(e)
+            if attempt < retries:
+                time.sleep(backoff * attempt)
+    log.warning("scrape %s failed after %d attempts: %s", safe, retries, last_err)
+    return None, last_err
+
+
+def _re_first(pattern, text, cast=float, default=None):
+    """Return first regex group from text cast to type, or default."""
+    if not text:
+        return default
+    import re as _re
+    m = _re.search(pattern, text)
+    if not m:
+        return default
+    try:
+        return cast(m.group(1).replace(",", ""))
+    except Exception:
+        return default
+
+
+def fetch_nymo():
+    """Scrape current NYMO from mcoscillator.com.
+    Returns {"nymo": float} or None on failure.
+    NOTE: site serves JS-rendered content; plain HTTP fetch unlikely to
+    return the live number → keep manual fallback.
+    """
+    text, err = _http_get_text(
+        "https://www.mcoscillator.com/market_breadth_data/",
+        timeout=20,
+    )
+    if not text:
+        log.warning("NYMO scrape error: %s", err)
+        return None
+    import re as _re
+    # Look for NYMO value in page - several possible table patterns
+    patterns = [
+        r'NYMO[^<>]{0,80}>([-+]?\d+\.?\d*)<',
+        r'NYSE McClellan Oscillator[^<>]{0,200}>([-+]?\d+\.?\d*)<',
+        r'id=["']nymo["'][^>]*>([-+]?\d+\.?\d*)<',
+    ]
+    for pat in patterns:
+        m = _re.search(pat, text, _re.IGNORECASE)
+        if m:
+            try:
+                val = float(m.group(1))
+                if -500 <= val <= 500:
+                    log.info("NYMO live = %.2f", val)
+                    return {"nymo": val}
+            except Exception:
+                pass
+    log.warning("NYMO: page fetched (%d chars) but value not parseable", len(text))
+    return None
+
+
+def fetch_naaim():
+    """Fetch latest NAAIM Exposure Index from naaim.org JSON or page.
+    Returns {"naaim": float} or None on failure.
+    """
+    # NAAIM publishes a simple JSON endpoint
+    data, err = http_get_json(
+        "https://www.naaim.org/wp-content/uploads/naaim-exposure-data.json",
+        headers=UA_HDR, timeout=20,
+    )
+    if isinstance(data, list) and data:
+        # Format: [{date, exposed_average, ...}, ...] sorted desc or asc
+        # Find the most recent entry
+        for rec in data:
+            val = None
+            for k in ("exposed_average", "naaim", "average", "mean"):
+                if k in rec:
+                    try:
+                        val = float(rec[k])
+                    except Exception:
+                        pass
+                    if val is not None:
+                        break
+            if val is not None and 0 <= val <= 200:
+                log.info("NAAIM live = %.1f", val)
+                return {"naaim": val}
+    # Fallback: scrape the page
+    text, err2 = _http_get_text("https://www.naaim.org/programs/naaim-exposure-index/", timeout=20)
+    if text:
+        import re as _re
+        # Look for "Exposure Index: XX.X" or numeric in a table near NAAIM header
+        m = _re.search(r'(?:Exposure Index|NAAIM)[^<>]{0,60}>(\d+\.?\d*)<', text, _re.IGNORECASE)
+        if m:
+            try:
+                val = float(m.group(1))
+                if 0 <= val <= 200:
+                    log.info("NAAIM (scraped) = %.1f", val)
+                    return {"naaim": val}
+            except Exception:
+                pass
+    log.warning("NAAIM: all fetches failed (%s / %s)", err, err2)
+    return None
+
+
+def fetch_aaii():
+    """Fetch latest AAII sentiment from aaii.com.
+    Returns {"bull": float, "bear": float} or None on failure.
+    """
+    # AAII publishes spreadsheet data - try the CSV / JSON endpoint first
+    text, err = _http_get_text(
+        "https://www.aaii.com/files/surveys/sentiment.xls",
+        timeout=20,
+    )
+    # If we can't get XLS, scrape the landing page
+    text2, err2 = _http_get_text("https://www.aaii.com/sentimentsurvey/sent_results", timeout=20)
+    if text2:
+        import re as _re
+        # Typical page has "Bullish: XX.X%" and "Bearish: XX.X%"
+        bull_m = _re.search(r'Bullish.*?(\d+\.?\d*)\s*%', text2, _re.IGNORECASE | _re.DOTALL)
+        bear_m = _re.search(r'Bearish.*?(\d+\.?\d*)\s*%', text2, _re.IGNORECASE | _re.DOTALL)
+        if bull_m and bear_m:
+            try:
+                bull = float(bull_m.group(1))
+                bear = float(bear_m.group(1))
+                if 0 <= bull <= 100 and 0 <= bear <= 100:
+                    log.info("AAII live: bull=%.1f%% bear=%.1f%%", bull, bear)
+                    return {"bull": bull, "bear": bear}
+            except Exception:
+                pass
+    log.warning("AAII: all fetches failed (%s / %s)", err, err2)
+    return None
+
+
+def fetch_gex():
+    """Fetch SPX net GEX and zero-gamma level from SpotGamma free tools page.
+    JS-rendered — plain HTTP fetch unlikely to return live numbers.
+    Returns {"net_gex": float, "zero_gamma": float} or None on failure.
+    """
+    text, err = _http_get_text(
+        "https://spotgamma.com/free-tools/spx-gamma-exposure/",
+        timeout=25,
+    )
+    if text:
+        import re as _re
+        # SpotGamma embeds values in JSON blobs or specific spans
+        ng_patterns = [
+            r'net[_\s-]?gex["\':\s]+([+-]?\d[\d,]*\.?\d*)',
+            r'Net GEX[^<>]{0,40}>(([+-]?\d[\d,]*\.?\d*))',
+            r'netGex["\':\s]+([+-]?\d[\d,]*)',
+        ]
+        zg_patterns = [
+            r'zero[_\s-]?gamma["\':\s]+([+-]?\d[\d,]*)',
+            r'Zero Gamma[^<>]{0,40}>(\d[\d,]*)',
+            r'zeroGamma["\':\s]+(\d[\d,]*)',
+        ]
+        net_gex = None
+        zero_gamma = None
+        for pat in ng_patterns:
+            m = _re.search(pat, text, _re.IGNORECASE)
+            if m:
+                try:
+                    net_gex = float(m.group(1).replace(",", ""))
+                    break
+                except Exception:
+                    pass
+        for pat in zg_patterns:
+            m = _re.search(pat, text, _re.IGNORECASE)
+            if m:
+                try:
+                    zero_gamma = float(m.group(1).replace(",", ""))
+                    break
+                except Exception:
+                    pass
+        if net_gex is not None:
+            log.info("GEX live: net_gex=%.0f zero_gamma=%s", net_gex, zero_gamma)
+            return {"net_gex": net_gex, "zero_gamma": zero_gamma}
+        log.warning("GEX: page fetched (%d chars) but values not parseable", len(text))
+    else:
+        log.warning("GEX fetch error: %s", err)
+    return None
+
+
+def fetch_cot_tradingster():
+    """Fallback COT source: Tradingster.com for ES E-mini positions.
+    Returns a dict compatible with the main cot_emini() output or None.
+    """
+    text, err = _http_get_text(
+        "https://www.tradingster.com/cot/futures/fin/13874A",
+        timeout=20,
+    )
+    if not text:
+        log.warning("Tradingster COT fetch error: %s", err)
+        return None
+    import re as _re
+    # Tradingster shows "Asset Manager - Long: X,XXX / Short: X,XXX"
+    am_l = _re_first(r'Asset Manager.*?Long.*?([\d,]+)', text, cast=lambda x: float(x.replace(",","")))
+    am_s = _re_first(r'Asset Manager.*?Short.*?([\d,]+)', text, cast=lambda x: float(x.replace(",","")))
+    lev_l = _re_first(r'Leveraged.*?Long.*?([\d,]+)', text, cast=lambda x: float(x.replace(",","")))
+    lev_s = _re_first(r'Leveraged.*?Short.*?([\d,]+)', text, cast=lambda x: float(x.replace(",","")))
+    if am_l and am_s and lev_l and lev_s:
+        return {
+            "asset_mgr_positions_long": am_l,
+            "asset_mgr_positions_short": am_s,
+            "lev_money_positions_long": lev_l,
+            "lev_money_positions_short": lev_s,
+            "change_in_lev_money_long": 0,   # Tradingster may not expose deltas
+            "change_in_lev_money_short": 0,
+            "_source": "tradingster",
+        }
+    return None
 
 
 def num(x):
@@ -572,9 +799,33 @@ if opex_days <= 3:
 cal_sub = "; ".join(cal_flags) if cal_flags else "clear"
 cal_col = "red" if cal_flags else "green"
 
-# ---- COT positioning (CFTC public data) ----
+# ---- COT positioning (CFTC public data + Tradingster fallback) ----
 cot_sub, cot_col = "no data", "gray"
 _cot = cot_emini()
+
+# Staleness check: CFTC data older than 10 days is treated as STALE/UNAVAILABLE
+_cot_stale = False
+if _cot and "report_date_as_yyyy_mm_dd" in _cot:
+    try:
+        import datetime as _dt2
+        _cot_date = _dt2.datetime.strptime(_cot["report_date_as_yyyy_mm_dd"], "%Y-%m-%d").date()
+        if (_utcnow().date() - _cot_date).days > 10:
+            log.warning("COT CFTC data is stale (%d days old); trying Tradingster fallback",
+                        (_utcnow().date() - _cot_date).days)
+            _cot_stale = True
+            _cot2 = fetch_cot_tradingster()
+            if _cot2:
+                _cot = _cot2
+            else:
+                _cot = None
+    except Exception as _e:
+        log.warning("COT date parse error: %s", _e)
+
+if not _cot and not _cot_stale:
+    # Primary fetch returned nothing - try Tradingster immediately
+    log.info("COT CFTC returned no data; trying Tradingster fallback")
+    _cot = fetch_cot_tradingster()
+
 if _cot:
     try:
         amL = float(_cot["asset_mgr_positions_long"])
@@ -586,16 +837,26 @@ if _cot:
         am_net = amL - amS
         lev_net = levL - levS
         lev_chg = dL - dS
-        cot_col = "red" if lev_chg <= -20000 else ("green" if lev_chg >= 20000 else "amber")
-        cot_sub = "Lev net %+.0fk (%+.0fk WoW); AM net %+.0fk" % (lev_net / 1000, lev_chg / 1000, am_net / 1000)
+        src = _cot.get("_source", "CFTC")
+        if am_net > 0:
+            cot_col = "green"
+            cot_sub = "AM net long %+.0f; Lev chg %+.0f [%s]" % (am_net, lev_chg, src)
+        else:
+            cot_col = "red"
+            cot_sub = "AM net short %+.0f; Lev chg %+.0f [%s]" % (am_net, lev_chg, src)
         CACHE.set("cot_sub", cot_sub, RUN_TS)
-    except Exception as ex:
-        log.warning("COT parse error: %s", ex)
-        cot_sub, cot_col = "parse error", "gray"
-if cot_sub in ("no data", "parse error"):
+        CACHE.set("cot_col", cot_col, RUN_TS)
+    except Exception as e:
+        log.warning("COT parse error: %s", e)
+        c = CACHE.get("cot_sub")
+        cc = CACHE.get("cot_col")
+        if c:
+            cot_sub, cot_col = c + " (last known)", cc or "amber"
+else:
     c = CACHE.get("cot_sub")
+    cc = CACHE.get("cot_col")
     if c:
-        cot_sub, cot_col = c + " (last known)", "amber"
+        cot_sub, cot_col = c + " (last known, COT STALE/UNAVAILABLE)", "amber"
 
 # ---- VVIX divergence (Yahoo Finance) ----
 vvix_sub, vvix_col = "no data", "gray"
@@ -616,9 +877,153 @@ if vvix_sub == "no data":
     if c:
         vvix_sub, vvix_col = c + " (last known)", "amber"
 
+
+# ---- McClellan Oscillator / NYMO (mcoscillator.com) ----
+nymo_sub, nymo_col = "manual — https://www.mcoscillator.com/market_breadth_data/ (check weekly)", "gray"
+_nymo_live = fetch_nymo()
+if _nymo_live and _nymo_live.get("nymo") is not None:
+    _nymo = _nymo_live["nymo"]
+    nymo_sub = "NYMO %.1f (%s)" % (_nymo, "above zero" if _nymo >= 0 else "BELOW ZERO")
+    nymo_col = "green" if _nymo >= 0 else "red"
+    CACHE.set("nymo", _nymo, RUN_TS)
+    log.info("NYMO live = %.2f", _nymo)
+else:
+    _nymo_cached = CACHE.get("nymo")
+    if _nymo_cached is not None:
+        nymo_sub = "NYMO %.1f (last known)" % _nymo_cached
+        nymo_col = "green" if _nymo_cached >= 0 else "red"
+        log.warning("NYMO: using cache (%.2f)", _nymo_cached)
+    # else stays as manual fallback label above
+mcclellan_divergence = (
+    nymo_col == "red" and spy_px is not None
+    # divergence = NYMO negative while SPX near highs — coarse check
+    # A more precise check would compare to a 52W high; here we flag whenever below zero
+)
+
+# ---- NAAIM Exposure Index (naaim.org) ----
+naaim_sub, naaim_col = "manual — https://www.naaim.org/programs/naaim-exposure-index/ (weekly)", "gray"
+_naaim_live = fetch_naaim()
+if _naaim_live and _naaim_live.get("naaim") is not None:
+    _naaim = _naaim_live["naaim"]
+    naaim_sub = "NAAIM %.1f%s" % (_naaim, " (mgrs ALL-IN ▲ contrarian-bearish)" if _naaim > 90 else "")
+    naaim_col = "red" if _naaim > 90 else ("green" if _naaim < 40 else "amber")
+    CACHE.set("naaim", _naaim, RUN_TS)
+else:
+    _naaim_cached = CACHE.get("naaim")
+    if _naaim_cached is not None:
+        naaim_sub = "NAAIM %.1f (last known)" % _naaim_cached
+        naaim_col = "red" if _naaim_cached > 90 else "amber"
+        log.warning("NAAIM: using cache (%.1f)", _naaim_cached)
+
+# ---- AAII Sentiment (aaii.com) ----
+aaii_sub, aaii_col = "manual — https://www.aaii.com/sentimentsurvey (weekly)", "gray"
+_aaii_live = fetch_aaii()
+if _aaii_live and _aaii_live.get("bull") is not None:
+    _bull = _aaii_live["bull"]
+    _bear = _aaii_live["bear"]
+    aaii_sub = "AAII bull %.0f%% bear %.0f%%" % (_bull, _bear)
+    aaii_col = "red" if _bull > 55 else ("green" if _bear > 45 else "amber")
+    CACHE.set("aaii_bull", _bull, RUN_TS)
+    CACHE.set("aaii_bear", _bear, RUN_TS)
+else:
+    _bcached = CACHE.get("aaii_bull")
+    _brcached = CACHE.get("aaii_bear")
+    if _bcached is not None:
+        aaii_sub = "AAII bull %.0f%% bear %.0f%% (last known)" % (_bcached, _brcached or 0)
+        aaii_col = "red" if _bcached > 55 else "amber"
+        log.warning("AAII: using cache")
+
+# ---- GEX / Gamma Exposure (SpotGamma, JS-rendered — likely manual fallback) ----
+gex_sub, gex_col = "manual — https://spotgamma.com/free-tools/spx-gamma-exposure/ (next-open)", "gray"
+_gex_live = fetch_gex()
+gamma_flip = False
+if _gex_live and _gex_live.get("net_gex") is not None:
+    _net_gex = _gex_live["net_gex"]
+    _zero_gex = _gex_live.get("zero_gamma")
+    gamma_flip = _net_gex < 0
+    flip_str = "GAMMA FLIP (neg GEX)" if gamma_flip else "pos GEX"
+    spot_vs = ""
+    if _zero_gex and spx_proxy:
+        spot_vs = " | SPX %s flip" % ("BELOW" if spx_proxy < _zero_gex else "above")
+    gex_sub = "Net GEX %+.0fB%s [%s]" % (_net_gex / 1e9 if abs(_net_gex) > 1e6 else _net_gex,
+                                           spot_vs, flip_str)
+    gex_col = "red" if gamma_flip else "green"
+    CACHE.set("net_gex", _net_gex, RUN_TS)
+    if _zero_gex:
+        CACHE.set("zero_gamma", _zero_gex, RUN_TS)
+else:
+    _gex_cached = CACHE.get("net_gex")
+    if _gex_cached is not None:
+        gamma_flip = _gex_cached < 0
+        gex_sub = "Net GEX %+.0f (last known%s)" % (
+            _gex_cached, ", GAMMA FLIP" if gamma_flip else "")
+        gex_col = "red" if gamma_flip else "amber"
+        log.warning("GEX: using cache (%.0f)", _gex_cached)
+
+# ---- SPX 200-day MA gate ----
+_spy_hist = yahoo_closes("SPY", 205)
+spx_above_200dma = None  # None = unknown
+spx_200dma = None
+if _spy_hist and len(_spy_hist) >= 200:
+    spx_200dma = sum(_spy_hist[-200:]) / 200.0
+    if spy_px is not None:
+        spx_above_200dma = (spy_px > spx_200dma)
+        log.info("SPX 200DMA gate: SPY %.2f vs 200MA %.2f -> above=%s",
+                 spy_px, spx_200dma, spx_above_200dma)
+
+
 # ===========================================================================
-# BUILD 13 TILES
+# VERDICT AUGMENTATION (live-indicators)
+# Runs after all data sources gathered so cal_sub, vvix_sub, GEX etc are set.
 # ===========================================================================
+
+# ---- 200DMA GATE ----
+if spx_above_200dma is True:
+    _200dma_note = " | 200DMA GATE: SPX above 200MA (~%.0f) — cap short conviction YELLOW" % (spx_200dma or 0)
+    primary = primary + _200dma_note
+elif spx_above_200dma is False:
+    primary = primary + " | 200DMA: SPX BELOW 200MA — structural short regime valid"
+
+# ---- BREADTH DECAY STREAK ----
+_prev_bd = CACHE.get("breadth_decay_streak") or 0
+if breadth_red:
+    breadth_decay_streak = int(_prev_bd) + 1
+else:
+    breadth_decay_streak = 0
+CACHE.set("breadth_decay_streak", breadth_decay_streak, RUN_TS)
+if breadth_decay_streak > 0:
+    primary = primary + " | Breadth decay streak: %d session%s" % (
+        breadth_decay_streak, "s" if breadth_decay_streak != 1 else "")
+
+# ---- LAYER-2 SIGNAL CHECK (GEX flip, VIX backwardation, McClellan divergence) ----
+_vix_backwardation = vvix_sub != "no data" and "rising" in vvix_sub.lower()
+_l2_signals = sum([gamma_flip, _vix_backwardation, mcclellan_divergence])
+
+# Clear calendar = no FOMC/OpEx within 2 days
+_cal_clear = (cal_sub not in ("no data",) and
+              not any(x in cal_sub for x in ("in 0d", "in 1d", "in 2d")))
+
+if _l2_signals >= 2 and _cal_clear:
+    _l2_names = []
+    if gamma_flip: _l2_names.append("GEX flip")
+    if _vix_backwardation: _l2_names.append("VIX backwardation")
+    if mcclellan_divergence: _l2_names.append("McClellan divergence")
+    _why_low = []
+    if "WATCHING" in primary: _why_low.append("PRIMARY still WATCHING")
+    if spx_above_200dma: _why_low.append("SPX above 200DMA")
+    _conv_note = "probe size" if (_why_low) else "standard"
+    layer2 = ("ENTRY SIGNAL - early/low-conviction (%s) [%s%s]" % (
+        _conv_note,
+        ", ".join(_l2_names),
+        ("; caveat: " + "; ".join(_why_low)) if _why_low else "",
+    ))
+    log.info("Layer2 ENTRY signal fired: %s", layer2)
+
+
+# ===========================================================================
+# BUILD 17 TILES
+# ===========================================================================
+p = []
 p = []
 p.append(("1. Equities (S&P via SPY)",
           ("SPY %.2f (%+.2f%%)" % (spy_px, spy_chg))
@@ -650,6 +1055,11 @@ p.append(("11. Sector rotation",
           ("red" if breadth_red else ("green" if breadth is not None else "gray"))))
 p.append(("12. Calendar gate", cal_sub, cal_col))
 p.append(("13. Fiscal impulse", fisc_sub, fisc_col))
+p.append(("14. McClellan / NYMO", nymo_sub, nymo_col))
+p.append(("15. NAAIM Exposure", naaim_sub, naaim_col))
+p.append(("16. AAII Sentiment", aaii_sub, aaii_col))
+p.append(("17. GEX / Gamma flip", gex_sub, gex_col))
+
 
 # count tiles that actually have data (not "unavailable"/"no data")
 DEAD = {"unavailable", "no data", "parse error"}
