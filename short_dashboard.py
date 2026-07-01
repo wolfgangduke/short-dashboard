@@ -555,58 +555,6 @@ def fetch_aaii():
     return None
 
 
-def fetch_gex():
-    # DEAD (vix-term-structure): tile #17 replaced by VIX term structure
-    # (VIX/VIX3M). SpotGamma is paywalled + JS-rendered so this never returned
-    # live values. Kept (not deleted) in case a live GEX feed is wired back in.
-    """Fetch SPX net GEX and zero-gamma level from SpotGamma free tools page.
-    JS-rendered — plain HTTP fetch unlikely to return live numbers.
-    Returns {"net_gex": float, "zero_gamma": float} or None on failure.
-    """
-    text, err = _http_get_text(
-        "https://spotgamma.com/free-tools/spx-gamma-exposure/",
-        timeout=25,
-    )
-    if text:
-        import re as _re
-        # SpotGamma embeds values in JSON blobs or specific spans
-        ng_patterns = [
-            r'net[_\s-]?gex["\':\s]+([+-]?\d[\d,]*\.?\d*)',
-            r'Net GEX[^<>]{0,40}>(([+-]?\d[\d,]*\.?\d*))',
-            r'netGex["\':\s]+([+-]?\d[\d,]*)',
-        ]
-        zg_patterns = [
-            r'zero[_\s-]?gamma["\':\s]+([+-]?\d[\d,]*)',
-            r'Zero Gamma[^<>]{0,40}>(\d[\d,]*)',
-            r'zeroGamma["\':\s]+(\d[\d,]*)',
-        ]
-        net_gex = None
-        zero_gamma = None
-        for pat in ng_patterns:
-            m = _re.search(pat, text, _re.IGNORECASE)
-            if m:
-                try:
-                    net_gex = float(m.group(1).replace(",", ""))
-                    break
-                except Exception:
-                    pass
-        for pat in zg_patterns:
-            m = _re.search(pat, text, _re.IGNORECASE)
-            if m:
-                try:
-                    zero_gamma = float(m.group(1).replace(",", ""))
-                    break
-                except Exception:
-                    pass
-        if net_gex is not None:
-            log.info("GEX live: net_gex=%.0f zero_gamma=%s", net_gex, zero_gamma)
-            return {"net_gex": net_gex, "zero_gamma": zero_gamma}
-        log.warning("GEX: page fetched (%d chars) but values not parseable", len(text))
-    else:
-        log.warning("GEX fetch error: %s", err)
-    return None
-
-
 def fetch_cot_tradingster():
     """Fallback COT source: Tradingster.com for ES E-mini positions.
     Returns a dict compatible with the main cot_emini() output or None.
@@ -1226,7 +1174,6 @@ if _cot:
         dL = float(_cot["change_in_lev_money_long"])
         dS = float(_cot["change_in_lev_money_short"])
         am_net = amL - amS
-        lev_net = levL - levS
         lev_chg = dL - dS
         src = _cot.get("_source", "CFTC")
         if am_net > 0:
@@ -1366,7 +1313,7 @@ else:
 # JS-rendered). We do NOT silently drop it from the 2-of-3 count — it is kept
 # as an explicit, currently-unavailable manual input (always False here) so the
 # ENTRY-SIGNAL math is intentional and can be re-enabled if a live GEX feed is
-# wired back in. See fetch_gex() (# DEAD) below.
+# wired back in (an explicit, currently-unavailable manual input).
 gamma_flip = False  # GEX flip: manual/unavailable input (SpotGamma paywalled)
 
 # ---- SPX 200-day MA gate ----
@@ -1374,8 +1321,6 @@ gamma_flip = False  # GEX flip: manual/unavailable input (SpotGamma paywalled)
 # but yahoo_closes() is hard-capped at range=10d so it never returned 200
 # sessions and this gate was permanently dormant. Now uses the wider Yahoo
 # fetcher (range=1y ~= 251 sessions) so the 200-day SMA can actually be built.
-# DEAD: yahoo_closes("SPY", 205) for the 200DMA gate -> only ~7 sessions on
-#       range=10d; replaced by _yahoo_closes_range("SPY", "1y") below.
 _spy_hist = _yahoo_closes_range("SPY", "1y")
 spx_above_200dma = None  # None = unknown
 spx_200dma = None
