@@ -1337,6 +1337,19 @@ else:
     log.warning("SPX 200DMA gate: insufficient SPY history (%s sessions); gate inactive",
                 len(_spy_hist) if _spy_hist else 0)
 
+# ---- 50DMA (companion to the 200DMA gate; reuses the same SPY history) ----
+spx_above_50dma = None  # None = unknown
+spx_50dma = None
+if _spy_hist and len(_spy_hist) >= 50:
+    spx_50dma = sum(_spy_hist[-50:]) / 50.0
+    if spy_px is not None:
+        spx_above_50dma = (spy_px > spx_50dma)
+        log.info("SPX 50DMA: SPY %.2f vs 50MA %.2f -> above=%s",
+                 spy_px, spx_50dma, spx_above_50dma)
+else:
+    log.warning("SPX 50DMA: insufficient SPY history (%d sessions)",
+                len(_spy_hist) if _spy_hist else 0)
+
 
 # ---- BREADTH PROXY (RSP/SPY equal-weight vs cap-weight) ----
 # Free, no-paid-tier breadth-direction proxy. Directional/relative only.
@@ -1547,36 +1560,170 @@ final_signal = ("No short tonight. " +
      "Breadth is holding above 50% and the curve is not inverted, so there is no edge to press here. ") +
     "Stay flat; watch breadth and net liquidity.")
 
+# ===========================================================================
+# HTML EMAIL (compact dark card; fully inline CSS; table-based for Gmail/Outlook/iPhone)
+# Renders identically on a wide desktop (fixed 440px centered card) and iPhone Mail.
+# Status-dot colours are derived from each tile's live PAL colour key
+# (green/amber/red/gray) - nothing about the numbers is hardcoded.
+# ===========================================================================
+
+# ---- theme tokens ----
+_C_PAGE   = "#0f1115"
+_C_PANEL  = "#12161c"
+_C_PANEL2 = "#161a20"
+_C_BORDER = "#262c36"
+_C_TEXT   = "#f4f6fa"
+_C_MUTED  = "#8b95a5"
+_DOT = {"green": "#4caf7d", "amber": "#e0a72d", "red": "#e0533d", "gray": "#8b95a5"}
+
+def _esc(s):
+    return (str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
+
+# verdict pill: STAND DOWN / WATCH / INITIATE, derived from the live verdict text.
+_pv = (primary or "").upper()
+if "INITIATE" in _pv or "SHORT NOW" in _pv or "GO" in _pv.split():
+    _banner_txt, _banner_bg, _banner_fg = "INITIATE", "#e0533d", "#0f1115"
+elif "WATCH" in _pv:
+    _banner_txt, _banner_bg, _banner_fg = "WATCH", "#e0a72d", "#0f1115"
+else:
+    _banner_txt, _banner_bg, _banner_fg = "STAND DOWN", "#4caf7d", "#0f1115"
+
+# 200DMA gate note (live)
+if spx_above_200dma is True:
+    _gate_note = "200DMA gate: SPX above 200MA (~%.0f) - short conviction capped." % (spx_200dma or 0)
+elif spx_above_200dma is False:
+    _gate_note = "200DMA gate: SPX below 200MA - gate open."
+else:
+    _gate_note = "200DMA gate: status unavailable."
+
+# hero SPX metrics (all live)
+_h_level = fmt_money(spx_proxy) if spx_proxy else "n/a"
+_h_day = ("%+.2f%%" % spy_chg) if spy_chg is not None else "n/a"
+_h_day_col = _DOT["green"] if (spy_chg or 0) >= 0 else _DOT["red"]
+if spx_proxy and spx_200dma:
+    _v200 = (spx_proxy / (spx_200dma * 10.0) - 1.0) * 100.0
+    _h_200 = "%+.1f%%" % _v200
+    _h_200_col = _DOT["green"] if _v200 >= 0 else _DOT["red"]
+else:
+    _h_200, _h_200_col = "n/a", _C_MUTED
+if spx_proxy and spx_50dma:
+    _v50 = (spx_proxy / (spx_50dma * 10.0) - 1.0) * 100.0
+    _h_50 = "%+.1f%%" % _v50
+    _h_50_col = _DOT["green"] if _v50 >= 0 else _DOT["red"]
+else:
+    _h_50, _h_50_col = "n/a", _C_MUTED
+
+# tally from live tile colours
+_n_red = sum(1 for _t, _s, _c in p if _c == "red")
+_n_amber = sum(1 for _t, _s, _c in p if _c == "amber")
+_n_green = sum(1 for _t, _s, _c in p if _c == "green")
+_n_gray = sum(1 for _t, _s, _c in p if _c == "gray")
+
+# indicator grid rows: coloured dot + label + right-aligned value (all live)
+_grid_rows = ""
+for _title, _sub, _ckey in p:
+    _dotc = _DOT.get(_ckey, _C_MUTED)
+    _grid_rows += (
+        '<tr>'
+        '<td style="padding:7px 0;border-bottom:1px solid %s;width:16px;vertical-align:top;">' % _C_BORDER +
+        '<span style="display:inline-block;width:9px;height:9px;border-radius:50%%;background:%s;"></span></td>' % _dotc +
+        '<td style="padding:7px 8px;border-bottom:1px solid %s;font-size:12px;color:%s;line-height:1.35;">%s</td>' % (_C_BORDER, _C_TEXT, _esc(_title)) +
+        '<td align="right" style="padding:7px 0;border-bottom:1px solid %s;font-size:11px;color:%s;line-height:1.35;white-space:nowrap;vertical-align:top;">%s</td>' % (_C_BORDER, _C_MUTED, _esc(_sub)) +
+        '</tr>')
+
+# data flags strip
+_flags = []
+if IS_HOLIDAY:
+    _flags.append("US market holiday - figures may reflect the prior session")
+if IS_WEEKEND:
+    _flags.append("US market closed (weekend) - figures reflect the prior session")
+if _n_gray:
+    _flags.append("%d/%d indicators unavailable this run" % (_n_gray, TOTAL_TILES))
+if not _flags:
+    _flags.append("All %d indicators returned live data" % TOTAL_TILES)
+_flags_html = " &nbsp;|&nbsp; ".join(_esc(f) for f in _flags)
+
+# next session label (informational)
+_next_session = "Next update after the next US close (~22:00 UTC, Mon-Fri)"
+
 html = (
-'<div style="font-family:Arial,Helvetica,sans-serif;max-width:640px;color:#2c2c2a;">'
-+ stale_banner +
-'<table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:14px;"><tr>'
-'<td style="font-size:18px;font-weight:bold;">MacroSage - SHORT signal</td>'
-'<td align="right" style="font-size:12px;color:#5f5e5a;">' + now + ' (live FMP/stable)</td></tr></table>'
-'<table width="100%" cellpadding="0" cellspacing="0" style="border-spacing:6px 0;margin-bottom:14px;"><tr>'
-+ card("S&P 500 (SPYx10)", spx_card, spx_sub, spx_subcol)
-+ card("VIX", vix_card, "live", "#5f5e5a")
-+ card("2s10s", sp_card, sp_sub, "#5f5e5a")
-+ card("Breadth", br_card, br_sub, ("#a32d2d" if breadth_red else "#5f5e5a"))
-+ '</tr></table>'
-'<table width="100%" cellpadding="0" cellspacing="0" style="border-spacing:6px;margin-bottom:14px;">' + rows + '</table>'
-'<table width="100%" cellpadding="0" cellspacing="0" style="border-spacing:6px;margin-bottom:14px;"><tr>'
-'<td width="50%" valign="top" style="background:#faeeda;border-radius:8px;padding:12px 14px;">'
-'<div style="font-size:11px;color:#854f0b;text-transform:uppercase;">Primary verdict</div>'
-'<div style="font-size:16px;font-weight:bold;color:#633806;">' + primary + '</div></td>'
-'<td width="50%" valign="top" style="background:#f1efe8;border-radius:8px;padding:12px 14px;">'
-'<div style="font-size:11px;color:#5f5e5a;text-transform:uppercase;">Layer 2 verdict</div>'
-'<div style="font-size:16px;font-weight:bold;color:#2c2c2a;">' + layer2 + '</div></td></tr></table>'
-'<div style="border:1px solid #d3d1c7;border-radius:8px;padding:11px 14px;font-size:13px;line-height:1.6;">'
-'<b>Final signal:</b> ' + final_signal + '</div>'
-'<div style="font-size:11px;color:#5f5e5a;margin-top:10px;">Legend: '
-'<span style="color:#e24b4a;">&#9632;</span> bearish &nbsp; '
-'<span style="color:#ef9f27;">&#9632;</span> neutral/capped &nbsp; '
-'<span style="color:#639922;">&#9632;</span> not bearish &nbsp; '
-'<span style="color:#888780;">&#9632;</span> unavailable</div>'
-'<div style="font-size:10px;color:#9a9890;margin-top:8px;">'
-+ ("%d of %d indicators retrieved this run. " % (TILES_WITH_DATA, TOTAL_TILES)) +
-'Research/educational only - not investment advice.</div></div>')
+    '<div style="margin:0;padding:0;background:' + _C_PAGE + ';">'
+    '<div style="width:100%;background:' + _C_PAGE + ';padding:18px 0;">'
+    # fixed-width centered card
+    '<table role="presentation" align="center" width="440" cellpadding="0" cellspacing="0" border="0" '
+    'style="width:440px;max-width:440px;margin:0 auto;background:' + _C_PANEL + ';border:1px solid ' + _C_BORDER + ';'
+    'border-radius:14px;font-family:-apple-system,BlinkMacSystemFont,Helvetica,Arial,sans-serif;">'
+    # (1) HEADER
+    '<tr><td style="padding:16px 18px 10px 18px;">'
+    '<div style="font-size:15px;font-weight:700;color:' + _C_TEXT + ';letter-spacing:0.3px;">MacroSage &middot; SHORT</div>'
+    '<div style="font-size:11px;color:' + _C_MUTED + ';padding-top:3px;">' + _esc(today) + '</div>'
+    '<div style="font-size:11px;color:' + _C_MUTED + ';padding-top:1px;">' + _esc(_next_session) + '</div>'
+    '</td></tr>'
+    # (2) HERO SPX BLOCK
+    '<tr><td style="padding:0 18px;">'
+    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" '
+    'style="background:' + _C_PANEL2 + ';border:1px solid ' + _C_BORDER + ';border-radius:10px;">'
+    '<tr><td style="padding:12px 14px;">'
+    '<div style="font-size:11px;color:' + _C_MUTED + ';text-transform:uppercase;letter-spacing:0.6px;">S&amp;P 500 (SPY x10)</div>'
+    '<div style="font-size:26px;font-weight:700;color:' + _C_TEXT + ';padding-top:2px;">' + _esc(_h_level) + '</div>'
+    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="padding-top:8px;"><tr>'
+    '<td width="33%" style="font-size:10px;color:' + _C_MUTED + ';">DAY<br><span style="font-size:14px;font-weight:600;color:' + _h_day_col + ';">' + _esc(_h_day) + '</span></td>'
+    '<td width="33%" style="font-size:10px;color:' + _C_MUTED + ';">vs 200DMA<br><span style="font-size:14px;font-weight:600;color:' + _h_200_col + ';">' + _esc(_h_200) + '</span></td>'
+    '<td width="33%" style="font-size:10px;color:' + _C_MUTED + ';">vs 50DMA<br><span style="font-size:14px;font-weight:600;color:' + _h_50_col + ';">' + _esc(_h_50) + '</span></td>'
+    '</tr></table>'
+    '</td></tr></table></td></tr>'
+    # (3) VERDICT BANNER + gate note + summary
+    '<tr><td style="padding:14px 18px 0 18px;">'
+    '<div style="text-align:center;"><span style="display:inline-block;background:' + _banner_bg + ';color:' + _banner_fg + ';'
+    'font-size:14px;font-weight:700;letter-spacing:1px;padding:7px 20px;border-radius:20px;">' + _esc(_banner_txt) + '</span></div>'
+    '<div style="font-size:11px;color:' + _C_MUTED + ';text-align:center;padding-top:8px;">' + _esc(_gate_note) + '</div>'
+    '<div style="font-size:12px;color:' + _C_TEXT + ';line-height:1.5;padding-top:8px;">' + _esc(final_signal) + '</div>'
+    '</td></tr>'
+    # (4) PRIMARY + LAYER 2 verdict rows
+    '<tr><td style="padding:14px 18px 0 18px;">'
+    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">'
+    '<tr><td style="padding:9px 12px;background:' + _C_PANEL2 + ';border:1px solid ' + _C_BORDER + ';border-radius:8px;">'
+    '<span style="font-size:10px;color:' + _C_MUTED + ';text-transform:uppercase;letter-spacing:0.6px;">Primary</span><br>'
+    '<span style="font-size:12px;color:' + _C_TEXT + ';line-height:1.45;">' + _esc(primary) + '</span></td></tr>'
+    '<tr><td style="height:8px;line-height:8px;font-size:8px;">&nbsp;</td></tr>'
+    '<tr><td style="padding:9px 12px;background:' + _C_PANEL2 + ';border:1px solid ' + _C_BORDER + ';border-radius:8px;">'
+    '<span style="font-size:10px;color:' + _C_MUTED + ';text-transform:uppercase;letter-spacing:0.6px;">Layer 2</span><br>'
+    '<span style="font-size:12px;color:' + _C_TEXT + ';line-height:1.45;">' + _esc(layer2) + '</span></td></tr>'
+    '</table></td></tr>'
+    # (5) INDICATOR GRID
+    '<tr><td style="padding:14px 18px 0 18px;">'
+    '<div style="font-size:10px;color:' + _C_MUTED + ';text-transform:uppercase;letter-spacing:0.6px;padding-bottom:2px;">Indicators</div>'
+    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">'
+    + _grid_rows +
+    '</table></td></tr>'
+    # (6) TALLY
+    '<tr><td style="padding:12px 18px 0 18px;">'
+    '<div style="font-size:11px;color:' + _C_MUTED + ';text-align:center;">'
+    '<span style="color:' + _DOT["red"] + ';font-weight:700;">' + str(_n_red) + ' red</span> &nbsp;&middot;&nbsp; '
+    '<span style="color:' + _DOT["amber"] + ';font-weight:700;">' + str(_n_amber) + ' yellow</span> &nbsp;&middot;&nbsp; '
+    '<span style="color:' + _DOT["green"] + ';font-weight:700;">' + str(_n_green) + ' green</span></div>'
+    '</td></tr>'
+    # (7) LAYER 2 TACTICAL BLOCK
+    '<tr><td style="padding:14px 18px 0 18px;">'
+    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" '
+    'style="background:' + _C_PANEL2 + ';border:1px solid ' + _C_BORDER + ';border-radius:8px;"><tr><td style="padding:10px 12px;">'
+    '<div style="font-size:10px;color:' + _C_MUTED + ';text-transform:uppercase;letter-spacing:0.6px;">Layer 2 &middot; Tactical</div>'
+    '<div style="font-size:12px;color:' + _C_TEXT + ';line-height:1.5;padding-top:4px;">' + _esc(layer2) + '</div>'
+    '</td></tr></table></td></tr>'
+    # (8) DATA FLAGS STRIP
+    '<tr><td style="padding:14px 18px 0 18px;">'
+    '<div style="background:#231a10;border:1px solid #4a3a1a;border-radius:8px;padding:9px 12px;'
+    'font-size:11px;color:#e0a72d;line-height:1.5;">&#9888; DATA FLAGS: ' + _flags_html + '</div>'
+    '</td></tr>'
+    # (9) FOOTER
+    '<tr><td style="padding:14px 18px 18px 18px;">'
+    '<div style="border-top:1px solid ' + _C_BORDER + ';padding-top:10px;font-size:10px;color:' + _C_MUTED + ';line-height:1.5;">'
+    'Generated ' + _esc(now) + '. Sources: FMP /stable/, FRED, Yahoo Finance, CFTC/Tradingster, Stooq. '
+    + str(TILES_WITH_DATA) + ' of ' + str(TOTAL_TILES) + ' indicators retrieved this run. '
+    'Research/educational only - not investment advice.</div>'
+    '</td></tr>'
+    '</table></div></div>'
+)
 
 plain = ("MacroSage SHORT signal - %s\nPRIMARY VERDICT: %s\nLAYER 2 VERDICT: %s\n\n%s\n\n"
          "%d of %d indicators retrieved. Research/educational only - not investment advice.\n"
