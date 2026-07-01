@@ -779,7 +779,7 @@ def _yahoo_closes_dated(symbol, rng="6mo"):
         out = {}
         for i in range(len(q)):
             if q[i] is not None:
-                day = datetime.datetime.utcfromtimestamp(ts[i]).strftime("%Y-%m-%d")
+                day = datetime.datetime.fromtimestamp(ts[i], datetime.timezone.utc).strftime("%Y-%m-%d")
                 out[day] = float(q[i])
         return out or None
     except Exception:
