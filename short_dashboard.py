@@ -556,6 +556,9 @@ def fetch_aaii():
 
 
 def fetch_gex():
+    # DEAD (vix-term-structure): tile #17 replaced by VIX term structure
+    # (VIX/VIX3M). SpotGamma is paywalled + JS-rendered so this never returned
+    # live values. Kept (not deleted) in case a live GEX feed is wired back in.
     """Fetch SPX net GEX and zero-gamma level from SpotGamma free tools page.
     JS-rendered — plain HTTP fetch unlikely to return live numbers.
     Returns {"net_gex": float, "zero_gamma": float} or None on failure.
@@ -754,6 +757,91 @@ def fetch_rsp_spy_ratio(n=120):
         log.warning("breadth proxy Stooq error: %s", ex)
 
     log.warning("breadth proxy: ALL sources failed (Yahoo, FMP v3, Stooq) - using cache")
+    return None
+
+
+def _yahoo_closes_dated(symbol, rng="6mo"):
+    """Daily closes as an ordered {date: close} map (oldest-first insertion).
+
+    Same wider Yahoo fetcher used for RSP/SPY and the 200DMA gate
+    (range=rng, ~60-126 sessions), but keyed by session date so two
+    series can be aligned on a common trading day rather than blindly by
+    -1 index (Yahoo occasionally drops a single session for one symbol).
+    Returns dict[str,float] or None on failure.
+    """
+    url = ("https://query1.finance.yahoo.com/v8/finance/chart/%s"
+           "?range=%s&interval=1d" % (symbol, rng))
+    d, _ = http_get_json(url, headers=UA_HDR)
+    try:
+        res = d["chart"]["result"][0]
+        q = res["indicators"]["quote"][0]["close"]
+        ts = res["timestamp"]
+        out = {}
+        for i in range(len(q)):
+            if q[i] is not None:
+                day = datetime.datetime.fromtimestamp(ts[i], datetime.timezone.utc).strftime("%Y-%m-%d")
+                out[day] = float(q[i])
+        return out or None
+    except Exception:
+        return None
+
+
+def compute_vix_term_structure(cache):
+    """VIX vs VIX3M term-structure regime (replaces the paywalled GEX tile).
+
+    ratio = VIX / VIX3M, measured on the most recent COMMON trading day.
+      ratio <  1.00 -> CONTANGO      (calm, vol-suppressing)
+      ratio >= 1.00 -> BACKWARDATION (stress, vol-amplifying)
+
+    Front-month ^VIX here is the SAME series feeding tile #2 (Volatility);
+    on the Starter FMP tier index quotes are gated, so both legs use the
+    keyless wider Yahoo fetcher for consistency.
+
+    Persists a backwardation_streak in state.json (integer, same shape as
+    breadth_proxy_streak / breadth_decay_streak). Returns dict or None:
+      {"vix": float, "vix3m": float, "ratio": float, "regime": str,
+       "streak": int, "date": str, "stale": bool}
+    """
+    vix_map = _yahoo_closes_dated("%5EVIX", "6mo")
+    v3_map = _yahoo_closes_dated("%5EVIX3M", "6mo")
+    if vix_map and v3_map:
+        common = sorted(d for d in vix_map if d in v3_map)
+        if common:
+            day = common[-1]
+            vix = vix_map[day]
+            v3 = v3_map[day]
+            if v3 and 5 <= vix <= 150 and 5 <= v3 <= 150:
+                ratio = vix / v3
+                regime = "BACKWARDATION" if ratio >= 1.0 else "CONTANGO"
+                prev = int(cache.get("backwardation_streak") or 0)
+                streak = prev + 1 if regime == "BACKWARDATION" else 0
+                cache.set("vix_ts_vix", round(vix, 2), RUN_TS)
+                cache.set("vix_ts_vix3m", round(v3, 2), RUN_TS)
+                cache.set("vix_ts_ratio", round(ratio, 4), RUN_TS)
+                cache.set("vix_ts_regime", regime, RUN_TS)
+                cache.set("backwardation_streak", streak, RUN_TS)
+                log.info("VIX term structure: VIX=%.2f VIX3M=%.2f ratio=%.4f -> %s"
+                         " (backwardation streak=%d, %s)",
+                         vix, v3, ratio, regime, streak, day)
+                return {"vix": vix, "vix3m": v3, "ratio": ratio,
+                        "regime": regime, "streak": streak, "date": day,
+                        "stale": False}
+            log.warning("VIX term structure: values out of range VIX=%s VIX3M=%s",
+                        vix, v3)
+        else:
+            log.warning("VIX term structure: no common date between ^VIX and ^VIX3M")
+    else:
+        log.warning("VIX term structure: Yahoo fetch failed (vix=%s vix3m=%s)",
+                    "ok" if vix_map else "None", "ok" if v3_map else "None")
+    # Fallback to last-known regime without advancing the streak.
+    cached = cache.get("vix_ts_ratio")
+    if cached is not None:
+        log.warning("VIX term structure: live unavailable; using last-known")
+        return {"vix": cache.get("vix_ts_vix"), "vix3m": cache.get("vix_ts_vix3m"),
+                "ratio": cached, "regime": cache.get("vix_ts_regime") or "CONTANGO",
+                "streak": int(cache.get("backwardation_streak") or 0),
+                "date": None, "stale": True}
+    log.warning("VIX term structure: no data and no cache")
     return None
 
 
@@ -1239,32 +1327,47 @@ else:
         aaii_col = "red" if _bcached > 55 else "amber"
         log.warning("AAII: using cache")
 
-# ---- GEX / Gamma Exposure (SpotGamma, JS-rendered — likely manual fallback) ----
-gex_sub, gex_col = "manual — https://spotgamma.com/free-tools/spx-gamma-exposure/ (next-open)", "gray"
-_gex_live = fetch_gex()
-gamma_flip = False
-if _gex_live and _gex_live.get("net_gex") is not None:
-    _net_gex = _gex_live["net_gex"]
-    _zero_gex = _gex_live.get("zero_gamma")
-    gamma_flip = _net_gex < 0
-    flip_str = "GAMMA FLIP (neg GEX)" if gamma_flip else "pos GEX"
-    spot_vs = ""
-    if _zero_gex and spx_proxy:
-        spot_vs = " | SPX %s flip" % ("BELOW" if spx_proxy < _zero_gex else "above")
-    gex_sub = "Net GEX %+.0fB%s [%s]" % (_net_gex / 1e9 if abs(_net_gex) > 1e6 else _net_gex,
-                                           spot_vs, flip_str)
-    gex_col = "red" if gamma_flip else "green"
-    CACHE.set("net_gex", _net_gex, RUN_TS)
-    if _zero_gex:
-        CACHE.set("zero_gamma", _zero_gex, RUN_TS)
+# ---- VIX Term Structure (VIX / VIX3M) regime ----
+# Replaces tile #17 (was GEX / gamma flip — permanently manual because
+# SpotGamma paywalls + JS-renders it). Front-month ^VIX is the same series
+# used by tile #2; both legs come from the keyless wider Yahoo fetcher
+# (FMP Starter tier gates index quotes). See compute_vix_term_structure().
+_vts = compute_vix_term_structure(CACHE)
+vix_ts_sub, vix_ts_col = "unavailable", "gray"
+# _vix_backwardation feeds the Layer-2 2-of-3 ENTRY SIGNAL check below.
+_vix_backwardation = False
+if _vts is not None:
+    _ratio = _vts["ratio"]
+    _regime = _vts["regime"]
+    _vts_stale = _vts.get("stale", False)
+    _vix_backwardation = (_regime == "BACKWARDATION") and not _vts_stale
+    _depth = "backwardation, ratio %.2f" % _ratio if _regime == "BACKWARDATION" \
+        else "contango, ratio %.2f" % _ratio
+    _streak_txt = ""
+    if _vts.get("streak"):
+        _streak_txt = " | backwardation streak: %d session%s" % (
+            _vts["streak"], "s" if _vts["streak"] != 1 else "")
+    vix_ts_sub = "VIX %.2f / VIX3M %.2f = %.3f — %s%s%s" % (
+        _vts["vix"], _vts["vix3m"], _ratio, _depth, _streak_txt,
+        " (last known)" if _vts_stale else "")
+    # BACKWARDATION = stress/vol-amplifying -> bearish/red; CONTANGO = calm -> green.
+    if _vts_stale:
+        vix_ts_col = "amber"
+    else:
+        vix_ts_col = "red" if _regime == "BACKWARDATION" else "green"
 else:
-    _gex_cached = CACHE.get("net_gex")
-    if _gex_cached is not None:
-        gamma_flip = _gex_cached < 0
-        gex_sub = "Net GEX %+.0f (last known%s)" % (
-            _gex_cached, ", GAMMA FLIP" if gamma_flip else "")
-        gex_col = "red" if gamma_flip else "amber"
-        log.warning("GEX: using cache (%.0f)", _gex_cached)
+    _cached_ratio = CACHE.get("vix_ts_ratio")
+    if _cached_ratio is not None:
+        vix_ts_sub = "VIX/VIX3M ratio %.3f (last known)" % _cached_ratio
+        vix_ts_col = "amber"
+        log.warning("VIX term structure: using cache (%.3f)", _cached_ratio)
+
+# GEX-flip Layer-2 input: the SpotGamma source stays unavailable (paywalled,
+# JS-rendered). We do NOT silently drop it from the 2-of-3 count — it is kept
+# as an explicit, currently-unavailable manual input (always False here) so the
+# ENTRY-SIGNAL math is intentional and can be re-enabled if a live GEX feed is
+# wired back in. See fetch_gex() (# DEAD) below.
+gamma_flip = False  # GEX flip: manual/unavailable input (SpotGamma paywalled)
 
 # ---- SPX 200-day MA gate ----
 # FIXED 2026-06-30 (fix-200dma): previously called yahoo_closes("SPY", 205),
@@ -1350,7 +1453,14 @@ if _bp is not None:
         primary = primary + " | BREADTH DIVERGENCE (RSP/SPY) CONFIRMED"
         log.info("BREADTH DIVERGENCE (RSP/SPY) CONFIRMED: SPX near highs, ratio narrowing")
 # ---- LAYER-2 SIGNAL CHECK (GEX flip, VIX backwardation, McClellan divergence) ----
-_vix_backwardation = vvix_sub != "no data" and "rising" in vvix_sub.lower()
+# _vix_backwardation is now set from the real VIX/VIX3M term-structure tile
+# (compute_vix_term_structure) above — no longer inferred from VVIX text.
+# The three ENTRY-SIGNAL inputs remain a 2-of-3 set:
+#   1) gamma_flip           — GEX flip (manual/unavailable: SpotGamma paywalled)
+#   2) _vix_backwardation   — VIX term structure in backwardation (LIVE via Yahoo)
+#   3) mcclellan_divergence — NYMO negative while SPX near highs
+# GEX-flip is retained (not dropped) as an explicit unavailable input so the
+# 2-of-3 threshold is unchanged and the math stays intentional.
 _l2_signals = sum([gamma_flip, _vix_backwardation, mcclellan_divergence])
 
 # Clear calendar = no FOMC/OpEx within 2 days
@@ -1412,7 +1522,7 @@ p.append(("13. Fiscal impulse", fisc_sub, fisc_col))
 p.append(("14. McClellan / NYMO", nymo_sub, nymo_col))
 p.append(("15. NAAIM Exposure", naaim_sub, naaim_col))
 p.append(("16. AAII Sentiment", aaii_sub, aaii_col))
-p.append(("17. GEX / Gamma flip", gex_sub, gex_col))
+p.append(("17. VIX Term Structure (VIX/VIX3M)", vix_ts_sub, vix_ts_col))
 
 # ---- Tile 18: breadth proxy (RSP/SPY) — directional/relative, NOT a precise % ----
 if _bp is not None:
