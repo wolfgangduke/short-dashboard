@@ -1591,13 +1591,13 @@ html = (
     'style="width:440px;max-width:440px;margin:0 auto;background:' + _C_PANEL + ';border:1px solid ' + _C_BORDER + ';'
     'border-radius:14px;font-family:-apple-system,BlinkMacSystemFont,Helvetica,Arial,sans-serif;">'
     # (1) HEADER
-    '<tr><td style="padding:16px 18px 10px 18px;">'
+    '<tr><td style="padding:16px 18px 10px 18px;background-color:' + _C_PANEL + ';">'
     '<div style="font-size:15px;font-weight:700;color:' + _C_TEXT + ';letter-spacing:0.3px;">MacroSage &middot; SHORT</div>'
     '<div style="font-size:11px;color:' + _C_MUTED + ';padding-top:3px;">' + _esc(today) + '</div>'
     '<div style="font-size:11px;color:' + _C_MUTED + ';padding-top:1px;">' + _esc(_next_session) + '</div>'
     '</td></tr>'
     # (2) HERO SPX BLOCK
-    '<tr><td style="padding:0 18px;">'
+    '<tr><td style="padding:0 18px;background-color:' + _C_PANEL + ';">'
     '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" '
     'style="background:' + _C_PANEL2 + ';border:1px solid ' + _C_BORDER + ';border-radius:10px;">'
     '<tr><td style="padding:12px 14px;">'
@@ -1617,7 +1617,7 @@ html = (
     '<div style="font-size:12px;color:' + _C_TEXT + ';line-height:1.5;padding-top:8px;">' + _esc(final_signal) + '</div>'
     '</td></tr>'
     # (4) PRIMARY + LAYER 2 verdict rows
-    '<tr><td style="padding:14px 18px 0 18px;">'
+    '<tr><td style="padding:14px 18px 0 18px;background-color:' + _C_PANEL + ';border-top:1px solid ' + _C_BORDER + ';">'
     '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">'
     '<tr><td style="padding:9px 12px;background:' + _C_PANEL2 + ';border:1px solid ' + _C_BORDER + ';border-radius:8px;">'
     '<span style="font-size:10px;color:' + _C_MUTED + ';text-transform:uppercase;letter-spacing:0.6px;">Primary</span><br>'
@@ -1628,32 +1628,32 @@ html = (
     '<span style="font-size:12px;color:' + _C_TEXT + ';line-height:1.45;">' + _esc(layer2) + '</span></td></tr>'
     '</table></td></tr>'
     # (5) INDICATOR GRID
-    '<tr><td style="padding:14px 18px 0 18px;">'
+    '<tr><td style="padding:14px 18px 0 18px;background-color:' + _C_PANEL2 + ';border-top:1px solid ' + _C_BORDER + ';">'
     '<div style="font-size:10px;color:' + _C_MUTED + ';text-transform:uppercase;letter-spacing:0.6px;padding-bottom:2px;">Indicators</div>'
     '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">'
     + _grid_rows +
     '</table></td></tr>'
     # (6) TALLY
-    '<tr><td style="padding:12px 18px 0 18px;">'
+    '<tr><td style="padding:12px 18px 0 18px;background-color:' + _C_PANEL2 + ';">'
     '<div style="font-size:11px;color:' + _C_MUTED + ';text-align:center;">'
     '<span style="color:' + _DOT["red"] + ';font-weight:700;">' + str(_n_red) + ' red</span> &nbsp;&middot;&nbsp; '
     '<span style="color:' + _DOT["amber"] + ';font-weight:700;">' + str(_n_amber) + ' yellow</span> &nbsp;&middot;&nbsp; '
     '<span style="color:' + _DOT["green"] + ';font-weight:700;">' + str(_n_green) + ' green</span></div>'
     '</td></tr>'
     # (7) LAYER 2 TACTICAL BLOCK
-    '<tr><td style="padding:14px 18px 0 18px;">'
+    '<tr><td style="padding:14px 18px 0 18px;background-color:' + _C_PANEL + ';border-top:1px solid ' + _C_BORDER + ';">'
     '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" '
     'style="background:' + _C_PANEL2 + ';border:1px solid ' + _C_BORDER + ';border-radius:8px;"><tr><td style="padding:10px 12px;">'
     '<div style="font-size:10px;color:' + _C_MUTED + ';text-transform:uppercase;letter-spacing:0.6px;">Layer 2 &middot; Tactical</div>'
     '<div style="font-size:12px;color:' + _C_TEXT + ';line-height:1.5;padding-top:4px;">' + _esc(layer2) + '</div>'
     '</td></tr></table></td></tr>'
     # (8) DATA FLAGS STRIP
-    '<tr><td style="padding:14px 18px 0 18px;">'
+    '<tr><td style="padding:14px 18px 0 18px;background-color:' + _C_PANEL + ';border-top:1px solid ' + _C_BORDER + ';">'
     '<div style="background:#231a10;border:1px solid #4a3a1a;border-radius:8px;padding:9px 12px;'
     'font-size:11px;color:#e0a72d;line-height:1.5;">&#9888; DATA FLAGS: ' + _flags_html + '</div>'
     '</td></tr>'
     # (9) FOOTER
-    '<tr><td style="padding:14px 18px 18px 18px;">'
+    '<tr><td style="padding:14px 18px 18px 18px;background-color:' + _C_PANEL + ';border-top:1px solid ' + _C_BORDER + ';">'
     '<div style="border-top:1px solid ' + _C_BORDER + ';padding-top:10px;font-size:10px;color:' + _C_MUTED + ';line-height:1.5;">'
     'Generated ' + _esc(now) + '. Sources: FMP /stable/, FRED, Yahoo Finance, CFTC/Tradingster, Stooq, WSJ. '
     + str(TILES_WITH_DATA) + ' of ' + str(TOTAL_TILES) + ' indicators retrieved this run. '
