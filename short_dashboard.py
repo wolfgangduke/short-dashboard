@@ -331,7 +331,7 @@ def _re_first(pattern, text, cast=float, default=None):
 
 def fetch_ad_series(n=60):
     """Fetch NYSE advancing/declining issues as a net-advances series.
-    Primary  : Stooq CSV ^ADVN / ^DECN (free, no auth, 200+ sessions, oldest-first).
+    Primary : WSJ Markets Diary JSON (wsj.com, free, no auth, 2 sessions/call).
     Secondary: Finviz homepage HTML (today only; PRE-MARKET returns 0/0 - rejected).
                NOTE: FMP v3 historical-price-full ^ADVN/^DECN was removed (dead:
                returned HTTP 403 - legacy /api/v3/ index endpoint no longer entitled).
@@ -344,49 +344,51 @@ def fetch_ad_series(n=60):
     t_end = _dt.date.today()
     t_start = t_end - _dt.timedelta(days=n * 2)  # 2x buffer for weekends/holidays
 
-    # --- Primary: Stooq CSV (free, no auth, returns 200+ daily sessions) ---
-    # URL: https://stooq.com/q/d/l/?s=<symbol>&i=d
-    # Response: CSV with header Date,Open,High,Low,Close,Volume, newest-first.
+    # --- Primary: WSJ Markets Diary JSON (free, no auth, NYSE daily A/D, 2 sessions) ---
+    # Endpoint: https://www.wsj.com/market-data/stocks/marketsdiary
+    #   ?id={"application":"WSJ","marketsDiaryType":"diaries"}&type=mdc_marketsdiary
+    # Returns instrumentSets[0]=NYSE with advances/declines for latestClose+previousClose.
     try:
-        def _stooq_closes(symbol):
-            url = ("https://stooq.com/q/d/l/?s=%s&i=d&d1=%s&d2=%s"
-                   % (symbol,
-                      t_start.strftime("%Y%m%d"),
-                      t_end.strftime("%Y%m%d")))
-            text, err = _http_get_text(url, timeout=20)
-            if not text:
-                log.warning("NYMO A/D Stooq %s: fetch failed (%s)", symbol, err)
-                return None
-            lines = text.strip().splitlines()
-            if len(lines) < 2 or not lines[0].startswith("Date"):
-                log.warning("NYMO A/D Stooq %s: unexpected format, first line=%r",
-                            symbol, lines[0] if lines else "")
-                return None
-            closes = []
-            for row in reversed(lines[1:]):  # Stooq newest-first -> reverse to oldest-first
-                parts = row.split(",")
-                if len(parts) >= 5:
-                    try:
-                        closes.append(int(float(parts[4])))  # Close column
-                    except (ValueError, IndexError):
-                        pass
-            return closes if closes else None
-
-        adv = _stooq_closes("%5Eadvn")
-        dec = _stooq_closes("%5Edecn")
-        if adv and dec:
-            min_len = min(len(adv), len(dec))
-            if min_len >= 10:  # sanity: at least 2 weeks
-                series = [a - d for a, d in zip(adv[:min_len], dec[:min_len])]
-                log.info("NYMO A/D: Stooq ^ADVN/^DECN, %d sessions (adv=%d, dec=%d)",
-                         len(series), len(adv), len(dec))
-                return series[-n:]
-            log.warning("NYMO A/D Stooq: too few rows adv=%d dec=%d", len(adv), len(dec))
+        _wsj_url = (
+            "https://www.wsj.com/market-data/stocks/marketsdiary"
+            "?id=%7B%22application%22%3A%22WSJ%22"
+            "%2C%22marketsDiaryType%22%3A%22diaries%22%7D"
+            "&type=mdc_marketsdiary"
+        )
+        _wsj_d, _wsj_e = http_get_json(_wsj_url, headers=UA_HDR)
+        if _wsj_d:
+            _sets = _wsj_d.get("data", {}).get("instrumentSets", [])
+            _nyse = next((s for s in _sets
+                if (s.get("headerFields") or [{}])[0].get("label","").upper() == "NYSE"),
+                None)
+            if _nyse:
+                def _wsj_val(instr, row_id, field):
+                    row = next((r for r in instr if r.get("id") == row_id), None)
+                    if not row: return None
+                    raw = str(row.get(field, "")).replace(",", "").strip()
+                    return int(float(raw)) if raw else None
+                _instr = _nyse.get("instruments", [])
+                _adv_cur = _wsj_val(_instr, "advances", "latestClose")
+                _dec_cur = _wsj_val(_instr, "declines", "latestClose")
+                _adv_prv = _wsj_val(_instr, "advances", "previousClose")
+                _dec_prv = _wsj_val(_instr, "declines", "previousClose")
+                _sess = []
+                if _adv_prv is not None and _dec_prv is not None:
+                    _sess.append(_adv_prv - _dec_prv)  # older session first
+                if _adv_cur is not None and _dec_cur is not None:
+                    _sess.append(_adv_cur - _dec_cur)
+                if _sess:
+                    log.info("NYMO A/D: WSJ diaries NYSE, %d sessions (adv=%s dec=%s)",
+                            len(_sess), _adv_cur, _dec_cur)
+                    return _sess[-n:]
+                else:
+                    log.warning("NYMO A/D WSJ: advances/declines missing in NYSE set")
+            else:
+                log.warning("NYMO A/D WSJ: NYSE set not found in response")
         else:
-            log.warning("NYMO A/D Stooq: adv=%s dec=%s",
-                        "ok" if adv else "None", "ok" if dec else "None")
+            log.warning("NYMO A/D WSJ: fetch failed (%s)", _wsj_e)
     except Exception as ex:
-        log.warning("NYMO A/D Stooq error: %s", ex)
+        log.warning("NYMO A/D WSJ error: %s", ex)
 
     # --- Secondary: Finviz homepage HTML (TODAY ONLY; PRE-MARKET returns 0/0) ---
     # WARNING: This path returns a single-session series. NYMO will be warm=True.
@@ -402,7 +404,7 @@ def fetch_ad_series(n=60):
                 if adv_n > 0 or dec_n > 0:  # reject pre-market 0/0
                     net = adv_n - dec_n
                     log.info("NYMO A/D: Finviz today-only fallback (all-US proxy), "
-                             "net=%d — Stooq+FMP both failed; NYMO warm=True", net)
+                             "net=%d — WSJ+Finviz both failed; NYMO warm=True", net)
                     return [net]
                 log.warning("NYMO A/D Finviz: pre-market 0/0 rejected")
             else:
@@ -412,7 +414,7 @@ def fetch_ad_series(n=60):
     except Exception as ex:
         log.warning("NYMO A/D Finviz error: %s", ex)
 
-    log.warning("NYMO A/D: ALL sources failed (Stooq, Finviz) — NYMO will use cache")
+    log.warning("NYMO A/D: ALL sources failed (WSJ, Finviz) — NYMO will use cache")
     return None
 
 
@@ -1653,7 +1655,7 @@ html = (
     # (9) FOOTER
     '<tr><td style="padding:14px 18px 18px 18px;">'
     '<div style="border-top:1px solid ' + _C_BORDER + ';padding-top:10px;font-size:10px;color:' + _C_MUTED + ';line-height:1.5;">'
-    'Generated ' + _esc(now) + '. Sources: FMP /stable/, FRED, Yahoo Finance, CFTC/Tradingster, Stooq. '
+    'Generated ' + _esc(now) + '. Sources: FMP /stable/, FRED, Yahoo Finance, CFTC/Tradingster, Stooq, WSJ. '
     + str(TILES_WITH_DATA) + ' of ' + str(TOTAL_TILES) + ' indicators retrieved this run. '
     'Research/educational only - not investment advice.</div>'
     '</td></tr>'
