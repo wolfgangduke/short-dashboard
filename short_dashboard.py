@@ -332,9 +332,9 @@ def _re_first(pattern, text, cast=float, default=None):
 def fetch_ad_series(n=60):
     """Fetch NYSE advancing/declining issues as a net-advances series.
     Primary  : Stooq CSV ^ADVN / ^DECN (free, no auth, 200+ sessions, oldest-first).
-    Secondary: FMP v3 historical-price-full (auth required, legacy endpoint, supports
-               index symbols; /stable/ endpoint 404s on ^ADVN - flagged dead below).
-    Tertiary : Finviz homepage HTML (today only; PRE-MARKET RETURNS 0/0 -> rejected).
+    Secondary: Finviz homepage HTML (today only; PRE-MARKET returns 0/0 - rejected).
+               NOTE: FMP v3 historical-price-full ^ADVN/^DECN was removed (dead:
+               returned HTTP 403 - legacy /api/v3/ index endpoint no longer entitled).
     # DEAD: FMP /stable/historical-price-full/%5EADVN -> HTTP 404 for index symbols.
     # DEAD: Yahoo v8 chart API 404s on ^ADVN/^DECN.
     # DEAD: Yahoo v7 download 401s (requires session auth) from server environments.
@@ -390,38 +390,7 @@ def fetch_ad_series(n=60):
     except Exception as ex:
         log.warning("NYMO A/D Stooq error: %s", ex)
 
-    # --- Secondary: FMP v3 (legacy, not /stable/) supports index symbols ---
-    # NOTE: /stable/historical-price-full/%5EADVN returns HTTP 404. Use /api/v3/.
-    if FMP:
-        try:
-            def _fmp_v3_closes(sym):
-                url = ("https://financialmodelingprep.com/api/v3/historical-price-full/%s"
-                       "?timeseries=%d&apikey=%s" % (sym, n * 2, FMP))
-                d, err = http_get_json(url)
-                if not d:
-                    log.warning("NYMO A/D FMP v3 %s: %s", sym, err)
-                    return None
-                hist = d.get("historical", [])
-                # FMP returns newest-first; reverse to oldest-first
-                return [int(float(r["close"])) for r in reversed(hist)
-                        if r.get("close") is not None] or None
-
-            adv = _fmp_v3_closes("%5EADVN")
-            dec = _fmp_v3_closes("%5EDECN")
-            if adv and dec:
-                min_len = min(len(adv), len(dec))
-                if min_len >= 10:
-                    series = [a - d for a, d in zip(adv[:min_len], dec[:min_len])]
-                    log.info("NYMO A/D: FMP v3 ^ADVN/^DECN, %d sessions", len(series))
-                    return series[-n:]
-                log.warning("NYMO A/D FMP v3: too few rows adv=%d dec=%d",
-                            len(adv) if adv else 0, len(dec) if dec else 0)
-        except Exception as ex:
-            log.warning("NYMO A/D FMP v3 error: %s", ex)
-    else:
-        log.warning("NYMO A/D: no FMP key (skipping v3 secondary)")
-
-    # --- Tertiary: Finviz homepage HTML (TODAY ONLY; PRE-MARKET returns 0/0) ---
+    # --- Secondary: Finviz homepage HTML (TODAY ONLY; PRE-MARKET returns 0/0) ---
     # WARNING: This path returns a single-session series. NYMO will be warm=True.
     # The pre-market 0/0 guard below prevents seeding EMAs with garbage.
     try:
