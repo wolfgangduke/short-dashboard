@@ -1462,205 +1462,227 @@ elif IS_WEEKEND:
                     "US market closed (weekend) - figures reflect the prior session.</div>")
 
 
-def card(label, value, sub, subcolor):
-    return ('<td width="25%" style="background:#f1efe8;border-radius:8px;padding:12px;">'
-            '<div style="font-size:12px;color:#5f5e5a;">' + label + '</div>'
-            '<div style="font-size:22px;font-weight:bold;">' + value + '</div>'
-            '<div style="font-size:11px;color:' + subcolor + ';">' + sub + '</div></td>')
+def build_html():
+    BG      = "#0f1115"
+    CARD    = "#12161c"
+    CARD2   = "#161a20"
+    BORDER  = "#262c36"
+    TEXT    = "#f4f6fa"
+    MUTED   = "#8b95a5"
+    GREEN   = "#4caf7d"
+    AMBER   = "#e0a72d"
+    RED     = "#e0533d"
+    GRAY    = "#8b95a5"
+    FONT    = "-apple-system,BlinkMacSystemFont,'Helvetica Neue',Arial,sans-serif"
 
+    dot_color = {"green": GREEN, "amber": AMBER, "red": RED, "gray": GRAY}
 
-def tile(title, sub, color):
-    bg, bd, tc = PAL[color]
-    return ('<td width="50%" valign="top" style="background:' + bg + ';border-left:4px solid ' + bd +
-            ';padding:8px 10px;"><span style="font-size:13px;font-weight:bold;color:' + tc + ';">' +
-            title + '</span><br><span style="font-size:12px;color:#5f5e5a;">' + sub + '</span></td>')
+    def esc(s):
+        return str(s).replace("&","&amp;").replace("<","&lt;").replace(">","&gt;")
 
+    def dot(ckey):
+        c = dot_color.get(ckey, GRAY)
+        return ('<span style="display:inline-block;width:10px;height:10px;'
+                'border-radius:50%%;background:%s;margin-right:8px;'
+                'flex-shrink:0;vertical-align:middle;"></span>' % c)
 
-spx_card = fmt_money(spx_proxy) if spx_proxy else "n/a"
-spx_sub = ("%+.2f%%" % spy_chg) if spy_chg is not None else "via SPY x10"
-spx_subcol = "#3b6d11" if (spy_chg or 0) >= 0 else "#a32d2d"
-vix_card = ("%.1f" % vix_px) if vix_px is not None else "n/a"
-sp_card = ("%+d bps" % spread_bps) if spread_bps is not None else "n/a"
-sp_sub = "steepening" if (spread_bps is not None and spread_bps >= 0) else ("inverted" if spread_bps is not None else "n/a")
-br_card = ("%d%%" % breadth) if breadth is not None else "n/a"
-br_sub = ("%d of %d green" % (up, up + down)) if breadth is not None else "no data"
+    def section(content, bg=None, extra_style=""):
+        bg = bg or CARD
+        return ('<tr><td style="padding:0;background:%s;border-bottom:1px solid %s;%s">%s</td></tr>'
+                % (bg, BORDER, extra_style, content))
 
-rows = ""
-for i in range(0, len(p), 2):
-    left = tile(*p[i])
-    right = tile(*p[i + 1]) if i + 1 < len(p) else '<td width="50%"></td>'
-    rows += "<tr>" + left + right + "</tr>"
+    def inner(content, pad="16px 20px"):
+        return '<div style="padding:%s">%s</div>' % (pad, content)
 
-final_signal = ("No short tonight. " +
-    ("Breadth is sub-50% with a defensive tilt - the one bearish tell - but it is a single session and the liquidity/positioning confirms are not aligned. "
-     if breadth_red else
-     "Breadth is holding above 50% and the curve is not inverted, so there is no edge to press here. ") +
-    "Stay flat; watch breadth and net liquidity.")
+    def label(txt, size="11px", color=None):
+        color = color or MUTED
+        return ('<span style="font-size:%s;color:%s;text-transform:uppercase;'
+                'letter-spacing:0.8px;font-weight:600;">%s</span>' % (size, color, esc(txt)))
 
-# ===========================================================================
-# HTML EMAIL (compact dark card; fully inline CSS; table-based for Gmail/Outlook/iPhone)
-# Renders identically on a wide desktop (fixed 440px centered card) and iPhone Mail.
-# Status-dot colours are derived from each tile's live PAL colour key
-# (green/amber/red/gray) - nothing about the numbers is hardcoded.
-# ===========================================================================
+    def big(txt, size="28px", color=None):
+        color = color or TEXT
+        return ('<span style="font-size:%s;font-weight:700;color:%s;'
+                'line-height:1.1;">%s</span>' % (size, color, esc(txt)))
 
-# ---- theme tokens ----
-_C_PAGE   = "#0f1115"
-_C_PANEL  = "#12161c"
-_C_PANEL2 = "#161a20"
-_C_BORDER = "#262c36"
-_C_TEXT   = "#f4f6fa"
-_C_MUTED  = "#8b95a5"
-_DOT = {"green": "#4caf7d", "amber": "#e0a72d", "red": "#e0533d", "gray": "#8b95a5"}
+    def pill(txt, bg, fg):
+        return ('<span style="display:inline-block;padding:5px 16px;border-radius:20px;'
+                'background:%s;color:%s;font-size:13px;font-weight:700;'
+                'letter-spacing:1px;">%s</span>' % (bg, fg, esc(txt)))
 
-def _esc(s):
-    return (str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
+    def kv(k, v, vcolor=None):
+        vcolor = vcolor or TEXT
+        return ('<table role="presentation" width="100%%" cellpadding="0" cellspacing="0"><tr>'
+                '<td style="font-size:12px;color:%s;">%s</td>'
+                '<td align="right" style="font-size:12px;color:%s;font-weight:600;">%s</td>'
+                '</tr></table>' % (MUTED, esc(k), vcolor, esc(v)))
 
-# verdict pill: STAND DOWN / WATCH / INITIATE, derived from the live verdict text.
-_pv = (primary or "").upper()
-if "INITIATE" in _pv or "SHORT NOW" in _pv or "GO" in _pv.split():
-    _banner_txt, _banner_bg, _banner_fg = "INITIATE", "#e0533d", "#0f1115"
-elif "WATCH" in _pv:
-    _banner_txt, _banner_bg, _banner_fg = "WATCH", "#e0a72d", "#0f1115"
-else:
-    _banner_txt, _banner_bg, _banner_fg = "STAND DOWN", "#4caf7d", "#0f1115"
+    def divider():
+        return '<div style="height:1px;background:%s;margin:0 20px;"></div>' % BORDER
 
-# 200DMA gate note (live)
-if spx_above_200dma is True:
-    _gate_note = "200DMA gate: SPX above 200MA (~%.0f) - short conviction capped." % (spx_200dma or 0)
-elif spx_above_200dma is False:
-    _gate_note = "200DMA gate: SPX below 200MA - gate open."
-else:
-    _gate_note = "200DMA gate: status unavailable."
+    # ---- verdict banner ----
+    pv = (primary or "").upper()
+    if "INITIATE" in pv or "SHORT NOW" in pv:
+        b_txt, b_bg, b_fg = "INITIATE SHORT", RED, "#fff"
+    elif "WATCH" in pv:
+        b_txt, b_bg, b_fg = "WATCHING", AMBER, "#000"
+    else:
+        b_txt, b_bg, b_fg = "STAND DOWN", GREEN, "#000"
 
-# hero SPX metrics (all live)
-_h_level = fmt_money(spx_proxy) if spx_proxy else "n/a"
-_h_day = ("%+.2f%%" % spy_chg) if spy_chg is not None else "n/a"
-_h_day_col = _DOT["green"] if (spy_chg or 0) >= 0 else _DOT["red"]
-if spx_proxy and spx_200dma:
-    _v200 = (spx_proxy / (spx_200dma * 10.0) - 1.0) * 100.0
-    _h_200 = "%+.1f%%" % _v200
-    _h_200_col = _DOT["green"] if _v200 >= 0 else _DOT["red"]
-else:
-    _h_200, _h_200_col = "n/a", _C_MUTED
-if spx_proxy and spx_50dma:
-    _v50 = (spx_proxy / (spx_50dma * 10.0) - 1.0) * 100.0
-    _h_50 = "%+.1f%%" % _v50
-    _h_50_col = _DOT["green"] if _v50 >= 0 else _DOT["red"]
-else:
-    _h_50, _h_50_col = "n/a", _C_MUTED
+    # ---- SPX hero numbers ----
+    spx_str   = fmt_money(spx_proxy) if spx_proxy else "n/a"
+    day_chg   = ("%+.2f%%" % spy_chg) if spy_chg is not None else ""
+    day_col   = GREEN if (spy_chg or 0) >= 0 else RED
+    vs200     = (("%+.1f%% vs 200d" % ((spx_proxy/(spx_200dma*10)-1)*100))
+                 if spx_proxy and spx_200dma else "")
+    vs50      = (("%+.1f%% vs 50d" % ((spx_proxy/(spx_50dma*10)-1)*100))
+                 if spx_proxy and spx_50dma else "")
 
-# tally from live tile colours
-_n_red = sum(1 for _t, _s, _c in p if _c == "red")
-_n_amber = sum(1 for _t, _s, _c in p if _c == "amber")
-_n_green = sum(1 for _t, _s, _c in p if _c == "green")
-_n_gray = sum(1 for _t, _s, _c in p if _c == "gray")
+    # ---- indicator rows ----
+    def ind_row(title, sub, ckey, last=False):
+        dc   = dot_color.get(ckey, GRAY)
+        bord = "" if last else "border-bottom:1px solid %s;" % BORDER
+        return (
+            '<tr>'
+            '<td style="padding:10px 20px;%s">'
+            '<table role="presentation" width="100%%" cellpadding="0" cellspacing="0"><tr>'
+            '<td style="width:20px;vertical-align:top;padding-top:2px;">'
+            '<span style="display:inline-block;width:10px;height:10px;border-radius:50%%;'
+            'background:%s;margin-top:3px;"></span></td>'
+            '<td style="font-size:13px;color:%s;font-weight:500;">%s</td>'
+            '<td align="right" style="font-size:12px;color:%s;max-width:180px;">%s</td>'
+            '</tr></table>'
+            '</td></tr>'
+        ) % (bord, dc, TEXT, esc(title), MUTED, esc(sub))
 
-# indicator grid rows: coloured dot + label + right-aligned value (all live)
-_grid_rows = ""
-for _title, _sub, _ckey in p:
-    _dotc = _DOT.get(_ckey, _C_MUTED)
-    _grid_rows += (
-        '<tr>'
-        '<td style="padding:7px 0;border-bottom:1px solid %s;width:16px;vertical-align:top;">' % _C_BORDER +
-        '<span style="display:inline-block;width:9px;height:9px;border-radius:50%%;background:%s;"></span></td>' % _dotc +
-        '<td style="padding:7px 8px;border-bottom:1px solid %s;font-size:12px;color:%s;line-height:1.35;">%s</td>' % (_C_BORDER, _C_TEXT, _esc(_title)) +
-        '<td align="right" style="padding:7px 0;border-bottom:1px solid %s;font-size:11px;color:%s;line-height:1.35;white-space:nowrap;vertical-align:top;">%s</td>' % (_C_BORDER, _C_MUTED, _esc(_sub)) +
-        '</tr>')
+    # ---- tally ----
+    n_red   = sum(1 for _,_,c in p if c == "red")
+    n_amber = sum(1 for _,_,c in p if c == "amber")
+    n_green = sum(1 for _,_,c in p if c == "green")
+    n_gray  = sum(1 for _,_,c in p if c == "gray")
 
-# data flags strip
-_flags = []
-if IS_HOLIDAY:
-    _flags.append("US market holiday - figures may reflect the prior session")
-if IS_WEEKEND:
-    _flags.append("US market closed (weekend) - figures reflect the prior session")
-if _n_gray:
-    _flags.append("%d/%d indicators unavailable this run" % (_n_gray, TOTAL_TILES))
-if not _flags:
-    _flags.append("All %d indicators returned live data" % TOTAL_TILES)
-_flags_html = " &nbsp;|&nbsp; ".join(_esc(f) for f in _flags)
+    # ----------------------------------------------------------------
+    # BUILD
+    # ----------------------------------------------------------------
+    rows = ""
 
-# next session label (informational)
-_next_session = "Next update after the next US close (~22:00 UTC, Mon-Fri)"
+    # 1. HEADER
+    rows += (
+        '<tr><td style="padding:18px 20px 14px;background:%s;">'
+        '<table role="presentation" width="100%%" cellpadding="0" cellspacing="0"><tr>'
+        '<td><span style="font-size:14px;font-weight:700;color:%s;'
+        'letter-spacing:0.5px;">MacroSage</span> '
+        '<span style="font-size:14px;color:%s;">SHORT</span></td>'
+        '<td align="right" style="font-size:11px;color:%s;">%s</td>'
+        '</tr></table>'
+        '</td></tr>'
+        '<tr><td style="height:1px;background:%s;"></td></tr>'
+    ) % (CARD, TEXT, MUTED, MUTED, esc(today), BORDER)
 
-html = (
-    '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="X-UA-Compatible" content="IE=edge"></head>'
-    '<body style="margin:0;padding:0;background-color:#0f1115;">' '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"' ' bgcolor="#0f1115" style="background-color:#0f1115;padding:18px 0;">' '<tr><td align="center" style="padding:18px 0;">'
-    # fixed-width centered card
-    '<table role="presentation" align="center" width="440" cellpadding="0" cellspacing="0" border="0" '
-    'style="width:440px;max-width:440px;margin:0 auto;background:' + _C_PANEL + ';border:1px solid ' + _C_BORDER + ';'
-    'border-radius:14px;font-family:-apple-system,BlinkMacSystemFont,Helvetica,Arial,sans-serif;">'
-    # (1) HEADER
-    '<tr><td style="padding:16px 18px 10px 18px;background-color:' + _C_PANEL + ';">'
-    '<div style="font-size:15px;font-weight:700;color:' + _C_TEXT + ';letter-spacing:0.3px;">MacroSage &middot; SHORT</div>'
-    '<div style="font-size:11px;color:' + _C_MUTED + ';padding-top:3px;">' + _esc(today) + '</div>'
-    '<div style="font-size:11px;color:' + _C_MUTED + ';padding-top:1px;">' + _esc(_next_session) + '</div>'
-    '</td></tr>'
-    # (2) HERO SPX BLOCK
-    '<tr><td style="padding:0 18px;background-color:' + _C_PANEL + ';">'
-    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" '
-    'style="background:' + _C_PANEL2 + ';border:1px solid ' + _C_BORDER + ';border-radius:10px;">'
-    '<tr><td style="padding:12px 14px;">'
-    '<div style="font-size:11px;color:' + _C_MUTED + ';text-transform:uppercase;letter-spacing:0.6px;">S&amp;P 500 (SPY x10)</div>'
-    '<div style="font-size:26px;font-weight:700;color:' + _C_TEXT + ';padding-top:2px;">' + _esc(_h_level) + '</div>'
-    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="padding-top:8px;"><tr>'
-    '<td width="33%" style="font-size:10px;color:' + _C_MUTED + ';">DAY<br><span style="font-size:14px;font-weight:600;color:' + _h_day_col + ';">' + _esc(_h_day) + '</span></td>'
-    '<td width="33%" style="font-size:10px;color:' + _C_MUTED + ';">vs 200DMA<br><span style="font-size:14px;font-weight:600;color:' + _h_200_col + ';">' + _esc(_h_200) + '</span></td>'
-    '<td width="33%" style="font-size:10px;color:' + _C_MUTED + ';">vs 50DMA<br><span style="font-size:14px;font-weight:600;color:' + _h_50_col + ';">' + _esc(_h_50) + '</span></td>'
-    '</tr></table>'
-    '</td></tr></table></td></tr>'
-    # (3) VERDICT BANNER + gate note + summary
-    '<tr><td style="padding:14px 18px 0 18px;">'
-    '<div style="text-align:center;"><span style="display:inline-block;background:' + _banner_bg + ';color:' + _banner_fg + ';'
-    'font-size:14px;font-weight:700;letter-spacing:1px;padding:7px 20px;border-radius:20px;">' + _esc(_banner_txt) + '</span></div>'
-    '<div style="font-size:11px;color:' + _C_MUTED + ';text-align:center;padding-top:8px;">' + _esc(_gate_note) + '</div>'
-    '<div style="font-size:12px;color:' + _C_TEXT + ';line-height:1.5;padding-top:8px;">' + _esc(final_signal) + '</div>'
-    '</td></tr>'
-    # (4) PRIMARY + LAYER 2 verdict rows
-    '<tr><td style="padding:14px 18px 0 18px;background-color:' + _C_PANEL + ';border-top:1px solid ' + _C_BORDER + ';">'
-    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">'
-    '<tr><td style="padding:9px 12px;background:' + _C_PANEL2 + ';border:1px solid ' + _C_BORDER + ';border-radius:8px;">'
-    '<span style="font-size:10px;color:' + _C_MUTED + ';text-transform:uppercase;letter-spacing:0.6px;">Primary</span><br>'
-    '<span style="font-size:12px;color:' + _C_TEXT + ';line-height:1.45;">' + _esc(primary) + '</span></td></tr>'
-    '<tr><td style="height:8px;line-height:8px;font-size:8px;">&nbsp;</td></tr>'
-    '<tr><td style="padding:9px 12px;background:' + _C_PANEL2 + ';border:1px solid ' + _C_BORDER + ';border-radius:8px;">'
-    '<span style="font-size:10px;color:' + _C_MUTED + ';text-transform:uppercase;letter-spacing:0.6px;">Layer 2</span><br>'
-    '<span style="font-size:12px;color:' + _C_TEXT + ';line-height:1.45;">' + _esc(layer2) + '</span></td></tr>'
-    '</table></td></tr>'
-    # (5) INDICATOR GRID
-    '<tr><td style="padding:14px 18px 0 18px;background-color:' + _C_PANEL2 + ';border-top:1px solid ' + _C_BORDER + ';">'
-    '<div style="font-size:10px;color:' + _C_MUTED + ';text-transform:uppercase;letter-spacing:0.6px;padding-bottom:2px;">Indicators</div>'
-    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">'
-    + _grid_rows +
-    '</table></td></tr>'
-    # (6) TALLY
-    '<tr><td style="padding:12px 18px 0 18px;background-color:' + _C_PANEL2 + ';">'
-    '<div style="font-size:11px;color:' + _C_MUTED + ';text-align:center;">'
-    '<span style="color:' + _DOT["red"] + ';font-weight:700;">' + str(_n_red) + ' red</span> &nbsp;&middot;&nbsp; '
-    '<span style="color:' + _DOT["amber"] + ';font-weight:700;">' + str(_n_amber) + ' yellow</span> &nbsp;&middot;&nbsp; '
-    '<span style="color:' + _DOT["green"] + ';font-weight:700;">' + str(_n_green) + ' green</span></div>'
-    '</td></tr>'
-    # (7) LAYER 2 TACTICAL BLOCK
-    '<tr><td style="padding:14px 18px 0 18px;background-color:' + _C_PANEL + ';border-top:1px solid ' + _C_BORDER + ';">'
-    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" '
-    'style="background:' + _C_PANEL2 + ';border:1px solid ' + _C_BORDER + ';border-radius:8px;"><tr><td style="padding:10px 12px;">'
-    '<div style="font-size:10px;color:' + _C_MUTED + ';text-transform:uppercase;letter-spacing:0.6px;">Layer 2 &middot; Tactical</div>'
-    '<div style="font-size:12px;color:' + _C_TEXT + ';line-height:1.5;padding-top:4px;">' + _esc(layer2) + '</div>'
-    '</td></tr></table></td></tr>'
-    # (8) DATA FLAGS STRIP
-    '<tr><td style="padding:14px 18px 0 18px;background-color:' + _C_PANEL + ';border-top:1px solid ' + _C_BORDER + ';">'
-    '<div style="background:#231a10;border:1px solid #4a3a1a;border-radius:8px;padding:9px 12px;'
-    'font-size:11px;color:#e0a72d;line-height:1.5;">&#9888; DATA FLAGS: ' + _flags_html + '</div>'
-    '</td></tr>'
-    # (9) FOOTER
-    '<tr><td style="padding:14px 18px 18px 18px;background-color:' + _C_PANEL + ';border-top:1px solid ' + _C_BORDER + ';">'
-    '<div style="border-top:1px solid ' + _C_BORDER + ';padding-top:10px;font-size:10px;color:' + _C_MUTED + ';line-height:1.5;">'
-    'Generated ' + _esc(now) + '. Sources: FMP /stable/, FRED, Yahoo Finance, CFTC/Tradingster, Stooq, WSJ. '
-    + str(TILES_WITH_DATA) + ' of ' + str(TOTAL_TILES) + ' indicators retrieved this run. '
-    'Research/educational only - not investment advice.</div>'
-    '</td></tr>'
-    '</table></td></tr></table></body></html>'
-)
+    # 2. SPX HERO
+    rows += (
+        '<tr><td style="padding:20px 20px 16px;background:%s;">'
+        '<div style="font-size:11px;color:%s;text-transform:uppercase;'
+        'letter-spacing:0.8px;margin-bottom:6px;">S&amp;P 500</div>'
+        '<div style="margin-bottom:4px;">'
+        '<span style="font-size:32px;font-weight:700;color:%s;line-height:1;">%s</span>'
+        '&nbsp;&nbsp;'
+        '<span style="font-size:16px;color:%s;font-weight:600;">%s</span>'
+        '</div>'
+        '<div style="font-size:12px;color:%s;">%s&nbsp;&nbsp;%s</div>'
+        '</td></tr>'
+        '<tr><td style="height:1px;background:%s;"></td></tr>'
+    ) % (CARD, MUTED, TEXT, esc(spx_str), day_col, esc(day_chg),
+         MUTED, esc(vs200), esc(vs50), BORDER)
+
+    # 3. VERDICT BANNER
+    rows += (
+        '<tr><td style="padding:14px 20px;background:%s;text-align:center;">'
+        '<span style="display:inline-block;padding:8px 28px;border-radius:24px;'
+        'background:%s;color:%s;font-size:15px;font-weight:700;'
+        'letter-spacing:1.5px;">%s</span>'
+        '</td></tr>'
+        '<tr><td style="height:1px;background:%s;"></td></tr>'
+    ) % (CARD2, b_bg, b_fg, esc(b_txt), BORDER)
+
+    # 4. PRIMARY + LAYER2 summary
+    rows += (
+        '<tr><td style="padding:14px 20px;background:%s;">'
+        '%s'
+        '%s'
+        '<div style="margin-top:8px;padding-top:8px;border-top:1px solid %s;">'
+        '<span style="font-size:11px;color:%s;">%s</span>'
+        '</div>'
+        '</td></tr>'
+        '<tr><td style="height:1px;background:%s;"></td></tr>'
+    ) % (CARD,
+         kv("PRIMARY", primary or "n/a"),
+         kv("LAYER 2", layer2 or "n/a"),
+         BORDER, MUTED, esc(_gate_note), BORDER)
+
+    # 5. INDICATOR GRID
+    ind_rows_html = ""
+    for idx, (title, sub, ckey) in enumerate(p):
+        ind_rows_html += ind_row(title, sub, ckey, last=(idx == len(p)-1))
+
+    rows += (
+        '<tr><td style="background:%s;">'
+        '<div style="padding:12px 20px 4px;font-size:11px;color:%s;'
+        'text-transform:uppercase;letter-spacing:0.8px;">Indicators</div>'
+        '<table role="presentation" width="100%%" cellpadding="0" cellspacing="0">'
+        '%s'
+        '</table>'
+        '</td></tr>'
+        '<tr><td style="height:1px;background:%s;"></td></tr>'
+    ) % (CARD2, MUTED, ind_rows_html, BORDER)
+
+    # 6. TALLY
+    rows += (
+        '<tr><td style="padding:10px 20px;background:%s;">'
+        '<span style="font-size:11px;color:%s;">Bearish&nbsp;</span>'
+        '<span style="font-size:13px;font-weight:700;color:%s;">%d</span>'
+        '<span style="font-size:11px;color:%s;">&nbsp;&nbsp;Watch&nbsp;</span>'
+        '<span style="font-size:13px;font-weight:700;color:%s;">%d</span>'
+        '<span style="font-size:11px;color:%s;">&nbsp;&nbsp;Neutral&nbsp;</span>'
+        '<span style="font-size:13px;font-weight:700;color:%s;">%d</span>'
+        '</td></tr>'
+        '<tr><td style="height:1px;background:%s;"></td></tr>'
+    ) % (CARD, MUTED, RED, n_red, MUTED, AMBER, n_amber, MUTED, GREEN, n_green, BORDER)
+
+    # 7. FOOTER
+    rows += (
+        '<tr><td style="padding:14px 20px;background:%s;">'
+        '<div style="font-size:10px;color:%s;line-height:1.6;">'
+        'Sources: FMP, FRED, Yahoo Finance, CFTC, WSJ &middot; '
+        '%d/%d indicators live &middot; %s'
+        '<br>Research/educational only &mdash; not investment advice.'
+        '</div>'
+        '</td></tr>'
+    ) % (CARD2, MUTED, TILES_WITH_DATA, TOTAL_TILES, esc(now))
+
+    # ---- OUTER SHELL ----
+    out = (
+        '<!DOCTYPE html>'
+        '<html lang="en"><head>'
+        '<meta charset="utf-8">'
+        '<meta name="viewport" content="width=device-width,initial-scale=1">'
+        '</head>'
+        '<body style="margin:0;padding:0;background:%s;">'
+        '<table role="presentation" width="100%%" cellpadding="0" cellspacing="0" '
+        'border="0" bgcolor="%s" style="background:%s;">'
+        '<tr><td align="center" style="padding:24px 12px;">'
+        '<table role="presentation" width="440" cellpadding="0" cellspacing="0" '
+        'border="0" align="center" '
+        'style="width:440px;max-width:440px;border-radius:12px;overflow:hidden;'
+        'border:1px solid %s;font-family:%s;">'
+        '%s'
+        '</table>'
+        '</td></tr></table>'
+        '</body></html>'
+    ) % (BG, BG, BG, BORDER, FONT, rows)
+
+    return out
+
+html = build_html()
 
 plain = ("MacroSage SHORT signal - %s\nPRIMARY VERDICT: %s\nLAYER 2 VERDICT: %s\n\n%s\n\n"
          "%d of %d indicators retrieved. Research/educational only - not investment advice.\n"
