@@ -1536,6 +1536,13 @@ def build_html():
                  if spx_proxy and spx_200dma else "")
     vs50      = (("%+.1f%% vs 50d" % ((spx_proxy/(spx_50dma*10)-1)*100))
                  if spx_proxy and spx_50dma else "")
+    # ---- 200DMA gate note ----
+    if spx_above_200dma is True:
+        gate_note = "200DMA gate: SPX above 200MA (~%.0f) - short conviction capped." % (spx_200dma or 0)
+    elif spx_above_200dma is False:
+        gate_note = "200DMA gate: SPX below 200MA - gate open."
+    else:
+        gate_note = "200DMA gate: status unavailable."
 
     # ---- indicator rows ----
     def ind_row(title, sub, ckey, last=False):
@@ -1617,7 +1624,7 @@ def build_html():
     ) % (CARD,
          kv("PRIMARY", primary or "n/a"),
          kv("LAYER 2", layer2 or "n/a"),
-         BORDER, MUTED, esc(_gate_note), BORDER)
+         BORDER, MUTED, esc(gate_note), BORDER)
 
     # 5. INDICATOR GRID
     ind_rows_html = ""
