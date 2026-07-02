@@ -58,7 +58,7 @@ def _utcnow():
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 STATE_PATH = os.path.join(HERE, "state.json")
-DEFAULT_RECIPIENTS = ["wolfgangduke@gmail.com", "richard.macrae.gordon@gmail.com"]
+DEFAULT_RECIPIENTS = ["wolfgangduke@gmail.com"]
 TOTAL_TILES = 18  # number of indicator tiles the engine computes
 
 # ---------------------------------------------------------------------------
@@ -91,7 +91,7 @@ FRED = cfg("FRED_API_KEY")
 
 
 def recipients():
-    """Always include the two named recipients; merge in anything from MAIL_TO."""
+    """Include the named recipient; merge in anything from MAIL_TO."""
     out = list(DEFAULT_RECIPIENTS)
     extra = cfg("MAIL_TO")
     if extra:
