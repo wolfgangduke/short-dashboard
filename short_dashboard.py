@@ -1480,45 +1480,6 @@ def build_html():
     def esc(s):
         return str(s).replace("&","&amp;").replace("<","&lt;").replace(">","&gt;")
 
-    def dot(ckey):
-        c = dot_color.get(ckey, GRAY)
-        return ('<span style="display:inline-block;width:10px;height:10px;'
-                'border-radius:50%%;background:%s;margin-right:8px;'
-                'flex-shrink:0;vertical-align:middle;"></span>' % c)
-
-    def section(content, bg=None, extra_style=""):
-        bg = bg or CARD
-        return ('<tr><td style="padding:0;background:%s;border-bottom:1px solid %s;%s">%s</td></tr>'
-                % (bg, BORDER, extra_style, content))
-
-    def inner(content, pad="16px 20px"):
-        return '<div style="padding:%s">%s</div>' % (pad, content)
-
-    def label(txt, size="11px", color=None):
-        color = color or MUTED
-        return ('<span style="font-size:%s;color:%s;text-transform:uppercase;'
-                'letter-spacing:0.8px;font-weight:600;">%s</span>' % (size, color, esc(txt)))
-
-    def big(txt, size="28px", color=None):
-        color = color or TEXT
-        return ('<span style="font-size:%s;font-weight:700;color:%s;'
-                'line-height:1.1;">%s</span>' % (size, color, esc(txt)))
-
-    def pill(txt, bg, fg):
-        return ('<span style="display:inline-block;padding:5px 16px;border-radius:20px;'
-                'background:%s;color:%s;font-size:13px;font-weight:700;'
-                'letter-spacing:1px;">%s</span>' % (bg, fg, esc(txt)))
-
-    def kv(k, v, vcolor=None):
-        vcolor = vcolor or TEXT
-        return ('<table role="presentation" width="100%%" cellpadding="0" cellspacing="0"><tr>'
-                '<td style="font-size:12px;color:%s;">%s</td>'
-                '<td align="right" style="font-size:12px;color:%s;font-weight:600;">%s</td>'
-                '</tr></table>' % (MUTED, esc(k), vcolor, esc(v)))
-
-    def divider():
-        return '<div style="height:1px;background:%s;margin:0 20px;"></div>' % BORDER
-
     # ---- verdict banner ----
     pv = (primary or "").upper()
     if "INITIATE" in pv or "SHORT NOW" in pv:
@@ -1538,49 +1499,12 @@ def build_html():
                  if spx_proxy and spx_50dma else "")
     # ---- 200DMA gate note ----
     if spx_above_200dma is True:
-        gate_note = "200DMA gate: SPX above 200MA (~%.0f) - short conviction capped." % (spx_200dma or 0)
+        gate_note = ("200DMA gate: SPX above 200MA (~%.0f) — short conviction caution."
+                     % (spx_200dma * 10)) if spx_200dma else "200DMA gate: SPX above 200MA — short conviction caution."
     elif spx_above_200dma is False:
-        gate_note = "200DMA gate: SPX below 200MA - gate open."
+        gate_note = "200DMA gate: SPX below 200MA — gate open."
     else:
         gate_note = "200DMA gate: status unavailable."
-    # ---- 200DMA gate note ----
-    if spx_above_200dma is True:
-        gate_note = "200DMA gate: SPX above 200MA (~%.0f) - short conviction capped." % (spx_200dma or 0)
-    elif spx_above_200dma is False:
-        gate_note = "200DMA gate: SPX below 200MA - gate open."
-    else:
-        gate_note = "200DMA gate: status unavailable."
-    # ---- 200DMA gate note ----
-    if spx_above_200dma is True:
-        gate_note = "200DMA gate: SPX above 200MA (~%.0f) - short conviction capped." % (spx_200dma or 0)
-    elif spx_above_200dma is False:
-        gate_note = "200DMA gate: SPX below 200MA - gate open."
-    else:
-        gate_note = "200DMA gate: status unavailable."
-    # ---- 200DMA gate note ----
-    if spx_above_200dma is True:
-        gate_note = "200DMA gate: SPX above 200MA (~%.0f) - short conviction capped." % (spx_200dma or 0)
-    elif spx_above_200dma is False:
-        gate_note = "200DMA gate: SPX below 200MA - gate open."
-    else:
-        gate_note = "200DMA gate: status unavailable."
-
-    # ---- indicator rows ----
-    def ind_row(title, sub, ckey, last=False):
-        dc   = dot_color.get(ckey, GRAY)
-        bord = "" if last else "border-bottom:1px solid %s;" % BORDER
-        return (
-            '<tr>'
-            '<td style="padding:10px 20px;%s">'
-            '<table role="presentation" width="100%%" cellpadding="0" cellspacing="0"><tr>'
-            '<td style="width:20px;vertical-align:top;padding-top:2px;">'
-            '<span style="display:inline-block;width:10px;height:10px;border-radius:50%%;'
-            'background:%s;margin-top:3px;"></span></td>'
-            '<td style="font-size:13px;color:%s;font-weight:500;">%s</td>'
-            '<td align="right" style="font-size:12px;color:%s;max-width:180px;">%s</td>'
-            '</tr></table>'
-            '</td></tr>'
-        ) % (bord, dc, TEXT, esc(title), MUTED, esc(sub))
 
     # ---- tally ----
     n_red   = sum(1 for _,_,c in p if c == "red")
@@ -1588,129 +1512,193 @@ def build_html():
     n_green = sum(1 for _,_,c in p if c == "green")
     n_gray  = sum(1 for _,_,c in p if c == "gray")
 
-    # ----------------------------------------------------------------
-    # BUILD
-    # ----------------------------------------------------------------
-    rows = ""
+    # ---- helper: one metric card (half-width) ----
+    def metric_card(title, sub, ckey):
+        dot_c = dot_color.get(ckey, GRAY)
+        return (
+            '<td width="50%%" style="padding:4px;">'
+            '<table width="100%%" cellpadding="0" cellspacing="0" border="0"'
+            ' style="background:%s;border:1px solid %s;border-radius:8px;">'
+            '<tr>'
+            '<td style="padding:10px 12px;">'
+            '<table width="100%%" cellpadding="0" cellspacing="0" border="0">'
+            '<tr>'
+            '<td style="padding:0 0 6px 0;">'
+            '<table cellpadding="0" cellspacing="0" border="0"><tr>'
+            '<td width="8" style="vertical-align:middle;">'
+            '<div style="width:8px;height:8px;border-radius:50%%;background:%s;'
+            'font-size:1px;line-height:8px;">&nbsp;</div></td>'
+            '<td style="padding-left:6px;font-family:%s;font-size:11px;'
+            'font-weight:600;color:%s;text-transform:uppercase;'
+            'letter-spacing:0.5px;vertical-align:middle;">%s</td>'
+            '</tr></table>'
+            '</td>'
+            '</tr>'
+            '<tr>'
+            '<td style="font-family:%s;font-size:12px;color:%s;'
+            'line-height:1.3;word-break:break-word;">%s</td>'
+            '</tr>'
+            '</table>'
+            '</td>'
+            '</tr>'
+            '</table>'
+            '</td>'
+        ) % (CARD2, BORDER, dot_c, FONT, TEXT, esc(title), FONT, MUTED, esc(sub) if sub else "&nbsp;")
 
-    # 1. HEADER
-    rows += (
-        '<tr><td style="padding:18px 20px 14px;background:%s;">'
-        '<table role="presentation" width="100%%" cellpadding="0" cellspacing="0"><tr>'
-        '<td><span style="font-size:14px;font-weight:700;color:%s;'
-        'letter-spacing:0.5px;">MacroSage</span> '
-        '<span style="font-size:14px;color:%s;">SHORT</span></td>'
-        '<td align="right" style="font-size:11px;color:%s;">%s</td>'
+    # ---- build indicator grid (2 columns) ----
+    grid_rows = ""
+    for i in range(0, len(p), 2):
+        left_title, left_sub, left_ckey = p[i]
+        if i + 1 < len(p):
+            right_title, right_sub, right_ckey = p[i+1]
+            right_cell = metric_card(right_title, right_sub, right_ckey)
+        else:
+            right_cell = '<td width="50%%" style="padding:4px;"></td>'
+        grid_rows += (
+            '<tr>%s%s</tr>'
+        ) % (metric_card(left_title, left_sub, left_ckey), right_cell)
+
+    out  = '<!DOCTYPE html>'
+    out += (
+        '<html><head><meta charset="UTF-8">'
+        '<meta name="viewport" content="width=device-width,initial-scale=1"></head>'
+        '<body style="margin:0;padding:0;background:%s;">'
+        '<table width="100%%" cellpadding="0" cellspacing="0" border="0" bgcolor="%s">'
+        '<tr><td align="center" style="padding:24px 8px;">'
+    ) % (BG, BG)
+
+    # ---- card shell ----
+    out += (
+        '<table width="440" cellpadding="0" cellspacing="0" border="0"'
+        ' style="max-width:440px;width:100%%;background:%s;'
+        'border:1px solid %s;border-radius:12px;overflow:hidden;">'
+    ) % (CARD, BORDER)
+
+    # ---- HEADER ----
+    out += (
+        '<tr><td bgcolor="%s" style="background:%s;padding:16px 20px;">'
+        '<table width="100%%" cellpadding="0" cellspacing="0" border="0"><tr>'
+        '<td style="font-family:%s;font-size:17px;font-weight:700;color:%s;'
+        'letter-spacing:-0.3px;">MacroSage&nbsp;<span style="color:%s;">SHORT</span></td>'
+        '<td align="right" style="font-family:%s;font-size:11px;color:%s;">%s</td>'
+        '</tr></table></td></tr>'
+    ) % (CARD, CARD, FONT, TEXT, RED, FONT, MUTED, esc(today))
+
+    # ---- VERDICT BANNER ----
+    out += (
+        '<tr><td bgcolor="%s" style="background:%s;padding:12px 20px;'
+        'border-top:1px solid %s;border-bottom:1px solid %s;text-align:center;">'
+        '<span style="display:inline-block;background:%s;color:%s;'
+        'font-family:%s;font-size:12px;font-weight:700;letter-spacing:1px;'
+        'text-transform:uppercase;padding:5px 18px;border-radius:20px;">%s</span>'
+        '</td></tr>'
+    ) % (CARD2, CARD2, BORDER, BORDER, b_bg, b_fg, FONT, b_txt)
+
+    # ---- SPX HERO + KEY METRICS (2-col grid) ----
+    out += (
+        '<tr><td style="padding:16px 16px 8px;">'
+        '<table width="100%%" cellpadding="0" cellspacing="0" border="0"><tr>'
+    )
+    # SPX card
+    out += (
+        '<td width="50%%" style="padding:4px;">'
+        '<table width="100%%" cellpadding="0" cellspacing="0" border="0"'
+        ' style="background:%s;border:1px solid %s;border-radius:8px;">'
+        '<tr><td style="padding:12px 14px;">'
+        '<div style="font-family:%s;font-size:10px;font-weight:600;color:%s;'
+        'text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">S&amp;P 500</div>'
+        '<div style="font-family:%s;font-size:22px;font-weight:700;color:%s;'
+        'line-height:1;">%s</div>'
+        '<div style="font-family:%s;font-size:13px;font-weight:600;color:%s;margin-top:3px;">%s</div>'
+        '<div style="font-family:%s;font-size:10px;color:%s;margin-top:4px;line-height:1.5;">%s%s%s</div>'
+        '</td></tr></table></td>'
+    ) % (CARD2, BORDER, FONT, MUTED, FONT, TEXT, esc(spx_str),
+         FONT, day_col, esc(day_chg),
+         FONT, MUTED, esc(vs200), " &nbsp; " if vs200 and vs50 else "", esc(vs50))
+
+    # Verdict detail card
+    out += (
+        '<td width="50%%" style="padding:4px;">'
+        '<table width="100%%" cellpadding="0" cellspacing="0" border="0"'
+        ' style="background:%s;border:1px solid %s;border-radius:8px;">'
+        '<tr><td style="padding:12px 14px;">'
+        '<div style="font-family:%s;font-size:10px;font-weight:600;color:%s;'
+        'text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;">Verdicts</div>'
+        '<div style="font-family:%s;font-size:11px;color:%s;margin-bottom:3px;">'
+        '<span style="color:%s;font-weight:600;">PRIMARY</span>&nbsp; %s</div>'
+        '<div style="font-family:%s;font-size:11px;color:%s;">'
+        '<span style="color:%s;font-weight:600;">LAYER 2</span>&nbsp; %s</div>'
+        '</td></tr></table></td>'
+    ) % (CARD2, BORDER, FONT, MUTED,
+         FONT, TEXT, MUTED, esc(primary or "n/a"),
+         FONT, TEXT, MUTED, esc(layer2 or "n/a"))
+
+    out += '</tr></table></td></tr>'
+
+    # ---- GATE NOTE ----
+    out += (
+        '<tr><td style="padding:0 20px 12px;">'
+        '<div style="font-family:%s;font-size:10px;color:%s;font-style:italic;'
+        'border-left:2px solid %s;padding-left:8px;">%s</div>'
+        '</td></tr>'
+    ) % (FONT, MUTED, BORDER, esc(gate_note))
+
+    # ---- INDICATORS SECTION HEADER ----
+    out += (
+        '<tr><td bgcolor="%s" style="background:%s;padding:10px 20px 6px;'
+        'border-top:1px solid %s;">'
+        '<div style="font-family:%s;font-size:10px;font-weight:700;color:%s;'
+        'text-transform:uppercase;letter-spacing:1px;">Indicators</div>'
+        '</td></tr>'
+    ) % (CARD, CARD, BORDER, FONT, MUTED)
+
+    # ---- INDICATOR GRID ----
+    out += (
+        '<tr><td bgcolor="%s" style="background:%s;padding:4px 12px 12px;">'
+        '<table width="100%%" cellpadding="0" cellspacing="0" border="0">%s</table>'
+        '</td></tr>'
+    ) % (CARD, CARD, grid_rows)
+
+    # ---- TALLY ROW ----
+    out += (
+        '<tr><td bgcolor="%s" style="background:%s;padding:14px 20px;'
+        'border-top:1px solid %s;text-align:center;">'
+        '<table cellpadding="0" cellspacing="0" border="0" align="center"><tr>'
+        '<td style="padding:0 12px;font-family:%s;font-size:12px;">'
+        '<span style="color:%s;font-weight:700;font-size:18px;">%d</span>'
+        '<span style="color:%s;">&nbsp;Bear</span></td>'
+        '<td style="color:%s;font-size:16px;">|</td>'
+        '<td style="padding:0 12px;font-family:%s;font-size:12px;">'
+        '<span style="color:%s;font-weight:700;font-size:18px;">%d</span>'
+        '<span style="color:%s;">&nbsp;Watch</span></td>'
+        '<td style="color:%s;font-size:16px;">|</td>'
+        '<td style="padding:0 12px;font-family:%s;font-size:12px;">'
+        '<span style="color:%s;font-weight:700;font-size:18px;">%d</span>'
+        '<span style="color:%s;">&nbsp;Neutral</span></td>'
         '</tr></table>'
         '</td></tr>'
-        '<tr><td style="height:1px;background:%s;"></td></tr>'
-    ) % (CARD, TEXT, MUTED, MUTED, esc(today), BORDER)
+    ) % (CARD2, CARD2, BORDER,
+         FONT, RED, n_red, MUTED,
+         BORDER, FONT, AMBER, n_amber, MUTED,
+         BORDER, FONT, GREEN, n_green, MUTED)
 
-    # 2. SPX HERO
-    rows += (
-        '<tr><td style="padding:20px 20px 16px;background:%s;">'
-        '<div style="font-size:11px;color:%s;text-transform:uppercase;'
-        'letter-spacing:0.8px;margin-bottom:6px;">S&amp;P 500</div>'
-        '<div style="margin-bottom:4px;">'
-        '<span style="font-size:32px;font-weight:700;color:%s;line-height:1;">%s</span>'
-        '&nbsp;&nbsp;'
-        '<span style="font-size:16px;color:%s;font-weight:600;">%s</span>'
-        '</div>'
-        '<div style="font-size:12px;color:%s;">%s&nbsp;&nbsp;%s</div>'
-        '</td></tr>'
-        '<tr><td style="height:1px;background:%s;"></td></tr>'
-    ) % (CARD, MUTED, TEXT, esc(spx_str), day_col, esc(day_chg),
-         MUTED, esc(vs200), esc(vs50), BORDER)
+    # ---- FOOTER ----
+    out += (
+        '<tr><td bgcolor="%s" style="background:%s;padding:12px 20px;'
+        'border-top:1px solid %s;text-align:center;">'
+        '<div style="font-family:%s;font-size:10px;color:%s;line-height:1.6;">'
+        '%d of %d indicators retrieved &bull; %s<br>'
+        '<span style="opacity:0.6;">Research/educational only &mdash; not investment advice</span>'
+        '</div></td></tr>'
+    ) % (CARD, CARD, BORDER, FONT, MUTED,
+         TILES_WITH_DATA, TOTAL_TILES, esc(now))
 
-    # 3. VERDICT BANNER
-    rows += (
-        '<tr><td style="padding:14px 20px;background:%s;text-align:center;">'
-        '<span style="display:inline-block;padding:8px 28px;border-radius:24px;'
-        'background:%s;color:%s;font-size:15px;font-weight:700;'
-        'letter-spacing:1.5px;">%s</span>'
-        '</td></tr>'
-        '<tr><td style="height:1px;background:%s;"></td></tr>'
-    ) % (CARD2, b_bg, b_fg, esc(b_txt), BORDER)
-
-    # 4. PRIMARY + LAYER2 summary
-    rows += (
-        '<tr><td style="padding:14px 20px;background:%s;">'
-        '%s'
-        '%s'
-        '<div style="margin-top:8px;padding-top:8px;border-top:1px solid %s;">'
-        '<span style="font-size:11px;color:%s;">%s</span>'
-        '</div>'
-        '</td></tr>'
-        '<tr><td style="height:1px;background:%s;"></td></tr>'
-    ) % (CARD,
-         kv("PRIMARY", primary or "n/a"),
-         kv("LAYER 2", layer2 or "n/a"),
-         BORDER, MUTED, esc(gate_note), BORDER)
-
-    # 5. INDICATOR GRID
-    ind_rows_html = ""
-    for idx, (title, sub, ckey) in enumerate(p):
-        ind_rows_html += ind_row(title, sub, ckey, last=(idx == len(p)-1))
-
-    rows += (
-        '<tr><td style="background:%s;">'
-        '<div style="padding:12px 20px 4px;font-size:11px;color:%s;'
-        'text-transform:uppercase;letter-spacing:0.8px;">Indicators</div>'
-        '<table role="presentation" width="100%%" cellpadding="0" cellspacing="0">'
-        '%s'
-        '</table>'
-        '</td></tr>'
-        '<tr><td style="height:1px;background:%s;"></td></tr>'
-    ) % (CARD2, MUTED, ind_rows_html, BORDER)
-
-    # 6. TALLY
-    rows += (
-        '<tr><td style="padding:10px 20px;background:%s;">'
-        '<span style="font-size:11px;color:%s;">Bearish&nbsp;</span>'
-        '<span style="font-size:13px;font-weight:700;color:%s;">%d</span>'
-        '<span style="font-size:11px;color:%s;">&nbsp;&nbsp;Watch&nbsp;</span>'
-        '<span style="font-size:13px;font-weight:700;color:%s;">%d</span>'
-        '<span style="font-size:11px;color:%s;">&nbsp;&nbsp;Neutral&nbsp;</span>'
-        '<span style="font-size:13px;font-weight:700;color:%s;">%d</span>'
-        '</td></tr>'
-        '<tr><td style="height:1px;background:%s;"></td></tr>'
-    ) % (CARD, MUTED, RED, n_red, MUTED, AMBER, n_amber, MUTED, GREEN, n_green, BORDER)
-
-    # 7. FOOTER
-    rows += (
-        '<tr><td style="padding:14px 20px;background:%s;">'
-        '<div style="font-size:10px;color:%s;line-height:1.6;">'
-        'Sources: FMP, FRED, Yahoo Finance, CFTC, WSJ &middot; '
-        '%d/%d indicators live &middot; %s'
-        '<br>Research/educational only &mdash; not investment advice.'
-        '</div>'
-        '</td></tr>'
-    ) % (CARD2, MUTED, TILES_WITH_DATA, TOTAL_TILES, esc(now))
-
-    # ---- OUTER SHELL ----
-    out = (
-        '<!DOCTYPE html>'
-        '<html lang="en"><head>'
-        '<meta charset="utf-8">'
-        '<meta name="viewport" content="width=device-width,initial-scale=1">'
-        '</head>'
-        '<body style="margin:0;padding:0;background:%s;">'
-        '<table role="presentation" width="100%%" cellpadding="0" cellspacing="0" '
-        'border="0" bgcolor="%s" style="background:%s;">'
-        '<tr><td align="center" style="padding:24px 12px;">'
-        '<table role="presentation" width="440" cellpadding="0" cellspacing="0" '
-        'border="0" align="center" '
-        'style="width:440px;max-width:440px;border-radius:12px;overflow:hidden;'
-        'border:1px solid %s;font-family:%s;">'
-        '%s'
-        '</table>'
-        '</td></tr></table>'
-        '</body></html>'
-    ) % (BG, BG, BG, BORDER, FONT, rows)
+    out += '</table>'
+    out += '</td></tr></table>'
+    out += '</body></html>'
 
     return out
 
-# ---- plain-text signal summary ----
 final_signal = primary or "No verdict"
 
 # ---- summary card values for log line ----
