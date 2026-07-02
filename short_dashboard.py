@@ -1584,8 +1584,8 @@ _flags_html = " &nbsp;|&nbsp; ".join(_esc(f) for f in _flags)
 _next_session = "Next update after the next US close (~22:00 UTC, Mon-Fri)"
 
 html = (
-    '<div style="margin:0;padding:0;background:' + _C_PAGE + ';">'
-    '<div style="width:100%;background:' + _C_PAGE + ';padding:18px 0;">'
+    '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="X-UA-Compatible" content="IE=edge"></head>'
+    '<body style="margin:0;padding:0;background-color:#0f1115;">' '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"' ' bgcolor="#0f1115" style="background-color:#0f1115;padding:18px 0;">' '<tr><td align="center" style="padding:18px 0;">'
     # fixed-width centered card
     '<table role="presentation" align="center" width="440" cellpadding="0" cellspacing="0" border="0" '
     'style="width:440px;max-width:440px;margin:0 auto;background:' + _C_PANEL + ';border:1px solid ' + _C_BORDER + ';'
@@ -1659,7 +1659,7 @@ html = (
     + str(TILES_WITH_DATA) + ' of ' + str(TOTAL_TILES) + ' indicators retrieved this run. '
     'Research/educational only - not investment advice.</div>'
     '</td></tr>'
-    '</table></div></div>'
+    '</table></td></tr></table></body></html>'
 )
 
 plain = ("MacroSage SHORT signal - %s\nPRIMARY VERDICT: %s\nLAYER 2 VERDICT: %s\n\n%s\n\n"
