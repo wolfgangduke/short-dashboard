@@ -335,9 +335,7 @@ def fetch_ad_series(n=60):
     Secondary: Finviz homepage HTML (today only; PRE-MARKET returns 0/0 - rejected).
                NOTE: FMP v3 historical-price-full ^ADVN/^DECN was removed (dead:
                returned HTTP 403 - legacy /api/v3/ index endpoint no longer entitled).
-    # DEAD: FMP /stable/historical-price-full/%5EADVN -> HTTP 404 for index symbols.
-    # DEAD: Yahoo v8 chart API 404s on ^ADVN/^DECN.
-    # DEAD: Yahoo v7 download 401s (requires session auth) from server environments.
+    # DEAD (removed): FMP v3 ^ADVN/^DECN -> 403; FMP stable ^ADVN -> 404; Yahoo v7/v8 -> 401/404.
     Returns  : list of net_adv (int) oldest-first, >=40 sessions on success, or None.
     Logs WARNING and returns None if all sources fail — caller uses last-known cache.
     """
@@ -414,7 +412,7 @@ def fetch_ad_series(n=60):
     except Exception as ex:
         log.warning("NYMO A/D Finviz error: %s", ex)
 
-    log.warning("NYMO A/D: ALL sources failed (Stooq, FMP v3, Finviz) — NYMO will use cache")
+    log.warning("NYMO A/D: ALL sources failed (Stooq, Finviz) — NYMO will use cache")
     return None
 
 
@@ -581,9 +579,8 @@ def fetch_rsp_spy_ratio(n=120):
     Free / no-paid-tier sources, in order:
       Primary  : Yahoo v8 chart API (keyless, returns ~60-120 sessions on
                  range=6mo; verified to serve both RSP and SPY).
-      Secondary: FMP /api/v3/historical-price-full (auth; legacy v3 endpoint,
-                 not /stable/ which 404s on some symbols).
-      Tertiary : Stooq CSV (keyless; may be rate-limited from some IPs).
+      Secondary: Stooq CSV (keyless; may be rate-limited from some IPs).
+                 NOTE: FMP /api/v3/historical-price-full removed (legacy; HTTP 403).
 
     Returns list[float] of daily ratios oldest-first (>=60 on success) or
     None if no source yields aligned RSP+SPY history (caller uses cache).
@@ -609,38 +606,7 @@ def fetch_rsp_spy_ratio(n=120):
     except Exception as ex:
         log.warning("breadth proxy Yahoo error: %s", ex)
 
-    # --- Secondary: FMP v3 (auth) ---
-    if FMP:
-        try:
-            def _fmp_v3_closes(sym):
-                url = ("https://financialmodelingprep.com/api/v3/historical-price-full/%s"
-                       "?timeseries=%d&apikey=%s" % (sym, n * 2, FMP))
-                d, err = http_get_json(url)
-                if not d:
-                    log.warning("breadth proxy FMP v3 %s: %s", sym, err)
-                    return None
-                hist = d.get("historical", [])
-                # FMP newest-first -> reverse to oldest-first
-                return [float(r["close"]) for r in reversed(hist)
-                        if r.get("close") is not None] or None
-
-            rsp = _fmp_v3_closes("RSP")
-            spy = _fmp_v3_closes("SPY")
-            if rsp and spy:
-                m = min(len(rsp), len(spy))
-                if m >= 60:
-                    ratio = [rsp[-m + i] / spy[-m + i] for i in range(m)
-                             if spy[-m + i]]
-                    if len(ratio) >= 60:
-                        log.info("breadth proxy: FMP v3 RSP/SPY, %d sessions", len(ratio))
-                        return ratio[-n:]
-                log.warning("breadth proxy FMP v3: too few aligned sessions")
-        except Exception as ex:
-            log.warning("breadth proxy FMP v3 error: %s", ex)
-    else:
-        log.warning("breadth proxy: no FMP key (skipping v3 secondary)")
-
-    # --- Tertiary: Stooq CSV (keyless) ---
+    # --- Secondary: Stooq CSV (keyless) ---
     try:
         def _stooq_closes(symbol):
             url = "https://stooq.com/q/d/l/?s=%s&i=d" % symbol
