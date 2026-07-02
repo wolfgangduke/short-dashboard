@@ -1543,6 +1543,13 @@ def build_html():
         gate_note = "200DMA gate: SPX below 200MA - gate open."
     else:
         gate_note = "200DMA gate: status unavailable."
+    # ---- 200DMA gate note ----
+    if spx_above_200dma is True:
+        gate_note = "200DMA gate: SPX above 200MA (~%.0f) - short conviction capped." % (spx_200dma or 0)
+    elif spx_above_200dma is False:
+        gate_note = "200DMA gate: SPX below 200MA - gate open."
+    else:
+        gate_note = "200DMA gate: status unavailable."
 
     # ---- indicator rows ----
     def ind_row(title, sub, ckey, last=False):
@@ -1688,6 +1695,9 @@ def build_html():
     ) % (BG, BG, BG, BORDER, FONT, rows)
 
     return out
+
+# ---- plain-text signal summary ----
+final_signal = primary or "No verdict"
 
 html = build_html()
 
