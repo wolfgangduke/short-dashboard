@@ -1,11 +1,11 @@
-# MacroSage SHORT dashboard - dependencies
+# short-dashboard - dependencies
 #
-# This project intentionally uses ONLY the Python standard library
+# Core dashboard intentionally uses ONLY the Python standard library
 # (urllib, json, smtplib, ssl, logging, datetime, calendar, email).
-# There are no third-party packages to install, so there are no version
-# pins to drift or break. The workflow still runs a compile check before
-# every run to catch syntax errors early.
+# No third-party packages needed for the main dashboard or fmp_client.py.
 #
-# If a third-party package is ever added, pin it here with == so the
-# scheduled run is reproducible, e.g.:
+# If a third-party package is ever added, pin it here with == e.g.:
 #   requests==2.32.3
+#
+# FMP API key: set FMP_API_KEY in .env (never commit .env)
+# See fmp_client.py for usage.
