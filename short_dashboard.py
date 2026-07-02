@@ -11,7 +11,7 @@ Hardened 2026-06-29:
     of crashing, so a single dead API never breaks the run
   * structured logging to stdout (visible in the GitHub Actions console)
   * US market-holiday detection (flags stale data, still sends)
-  * a final summary line: "Run complete - X/13 signals retrieved, email sent: Y"
+  * a final summary line: "Run complete - X/18 signals retrieved, email sent: Y"
 
 Keys/secrets are read from environment variables (GitHub Actions Secrets) and
 fall back to a local .env for development. No third-party packages are required.
@@ -499,12 +499,8 @@ def fetch_aaii():
     """Fetch latest AAII sentiment from aaii.com.
     Returns {"bull": float, "bear": float} or None on failure.
     """
-    # AAII publishes spreadsheet data - try the CSV / JSON endpoint first
-    text, err = _http_get_text(
-        "https://www.aaii.com/files/surveys/sentiment.xls",
-        timeout=20,
-    )
-    # If we can't get XLS, scrape the landing page
+    # AAII publishes sentiment on its landing page - scrape it
+    # Scrape the landing page for the latest bull/bear percentages
     text2, err2 = _http_get_text("https://www.aaii.com/sentimentsurvey/sent_results", timeout=20)
     if text2:
         import re as _re
@@ -520,7 +516,7 @@ def fetch_aaii():
                     return {"bull": bull, "bear": bear}
             except Exception:
                 pass
-    log.warning("AAII: all fetches failed (%s / %s)", err, err2)
+    log.warning("AAII: all fetches failed (%s)", err2)
     return None
 
 
@@ -881,7 +877,6 @@ for key, path in [
     ("vix", "quote?symbol=%5EVIX"),
     ("gold", "quote?symbol=GCUSD"),
     ("treasury", "treasury-rates"),
-    ("rsi", "technical-indicators/rsi?symbol=SPY&periodLength=14&timeframe=1day"),
 ]:
     d, e = fmp(path)
     if d:
@@ -909,11 +904,6 @@ t = D.get("treasury", {}) if isinstance(D.get("treasury"), dict) else {}
 y2, _ = keep("y2", num(t.get("year2")), -2, 25)
 y10, _ = keep("y10", num(t.get("year10")), -2, 25)
 spread_bps = round((y10 - y2) * 100) if (y2 is not None and y10 is not None) else None
-
-rsi_val = None
-r = D.get("rsi", {})
-if isinstance(r, dict):
-    rsi_val, _ = keep("rsi", num(r.get("rsi")), 0, 100)
 
 
 def sector_chg(s):
@@ -1275,14 +1265,9 @@ else:
                 len(_spy_hist) if _spy_hist else 0)
 
 # ---- 50DMA (companion to the 200DMA gate; reuses the same SPY history) ----
-spx_above_50dma = None  # None = unknown
 spx_50dma = None
 if _spy_hist and len(_spy_hist) >= 50:
     spx_50dma = sum(_spy_hist[-50:]) / 50.0
-    if spy_px is not None:
-        spx_above_50dma = (spy_px > spx_50dma)
-        log.info("SPX 50DMA: SPY %.2f vs 50MA %.2f -> above=%s",
-                 spy_px, spx_50dma, spx_above_50dma)
 else:
     log.warning("SPX 50DMA: insufficient SPY history (%d sessions)",
                 len(_spy_hist) if _spy_hist else 0)
@@ -1383,7 +1368,6 @@ if _l2_signals >= 2 and _cal_clear:
 # BUILD 18 TILES
 # ===========================================================================
 p = []
-p = []
 p.append(("1. Equities (S&P via SPY)",
           ("SPY %.2f (%+.2f%%)" % (spy_px, spy_chg))
           if (spy_px is not None and spy_chg is not None)
@@ -1397,8 +1381,8 @@ p.append(("3. Rates / yield curve",
           ("green" if (spread_bps is not None and spread_bps >= 0)
            else ("red" if spread_bps is not None else "gray"))))
 p.append(("4. Credit spreads", credit_sub, credit_col))
-p.append(("5. Commodities (Cu/Au)",
-          ("Gold $%s; copper=Premium" % fmt_money(gold_px)) if gold_px is not None else "unavailable",
+p.append(("5. Commodities (Gold)",
+          ("Gold $%s" % fmt_money(gold_px)) if gold_px is not None else "unavailable",
           "gray"))
 p.append(("6. Dollar / FX", usd_sub, usd_col))
 p.append(("7. Market breadth",
@@ -1507,7 +1491,6 @@ def build_html():
     n_red   = sum(1 for _,_,c in p if c == "red")
     n_amber = sum(1 for _,_,c in p if c == "amber")
     n_green = sum(1 for _,_,c in p if c == "green")
-    n_gray  = sum(1 for _,_,c in p if c == "gray")
 
     def metric_card(title, sub, ckey):
         import re as _re
@@ -1661,15 +1644,6 @@ spx_card = fmt_money(spx_proxy) if spx_proxy else "n/a"
 vix_card = ("%.1f" % vix_px) if vix_px is not None else "n/a"
 sp_card  = ("%+d bps" % spread_bps) if spread_bps is not None else "n/a"
 br_card  = ("%d%%" % breadth) if breadth is not None else "n/a"
-# ---- plain-text signal summary ----
-final_signal = primary or "No verdict"
-
-# ---- summary card values for log line ----
-spx_card = fmt_money(spx_proxy) if spx_proxy else "n/a"
-vix_card = ("%.1f" % vix_px) if vix_px is not None else "n/a"
-sp_card  = ("%+d bps" % spread_bps) if spread_bps is not None else "n/a"
-br_card  = ("%d%%" % breadth) if breadth is not None else "n/a"
-final_signal = primary or "No verdict"
 
 html = build_html()
 
