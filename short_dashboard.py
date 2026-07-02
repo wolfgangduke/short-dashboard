@@ -1162,11 +1162,6 @@ else:
         nymo_col = "green" if _nymo_cached >= 0 else "red"
         log.warning("NYMO: A/D unavailable, using cache (%.2f)", _nymo_cached)
     # else stays as manual fallback label above
-mcclellan_divergence = (
-    nymo_col == "red" and spy_px is not None
-    # divergence = NYMO negative while SPX near highs
-    # A more precise check would compare to a 52W high; this is a proxy
-)
 
 # ---- NAAIM Exposure Index (naaim.org) ----
 naaim_sub, naaim_col = "manual — https://www.naaim.org/programs/naaim-exposure-index/ (weekly)", "gray"
@@ -1291,6 +1286,12 @@ try:
         _spx_near_high = spy_px >= _recent_high * 0.98
 except Exception as _ex:
     log.warning("breadth proxy: SPX recent-high context failed: %s", _ex)
+
+# McClellan divergence: NYMO negative WHILE SPX near its 52-week high.
+# _spx_near_high is computed just above (defaults to None if the fetch failed),
+# mirroring the breadth-divergence gate so this Layer-2 signal only fires on a
+# genuine price/breadth divergence rather than on any negative NYMO reading.
+mcclellan_divergence = (nymo_col == "red") and bool(_spx_near_high)
 
 
 # ===========================================================================
@@ -1541,6 +1542,10 @@ def build_html():
             'MacroSage <span style="color:%s;">SHORT</span></td>'
             '<td align="right" style="font-family:%s;font-size:10px;color:%s;">%s</td>'
             '</tr></table></td></tr>') % (CARD, CARD, BORDER, FONT, TEXT, RED, FONT, MUTED, esc(today))
+
+    # HOLIDAY / STALE-DATA BANNER (renders only when stale_banner is non-empty)
+    if stale_banner:
+        out += f'<tr><td style="padding:0 16px 12px 16px;">{stale_banner}</td></tr>'
 
     # SPX + VERDICT PILL
     out += ('<tr><td bgcolor="%s" style="background:%s;padding:11px 16px;'
