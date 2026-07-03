@@ -1017,6 +1017,12 @@ else:
     primary = "WATCHING - Day 1 of 3"
 layer2 = "WAIT"
 
+# Explicit INITIATE SHORT verdict flag (do NOT infer the banner from words in
+# the primary string). Set True ONLY when a genuine escalation actually fires.
+# The base verdict above is always WATCHING-based, so this starts False; the
+# 200DMA and monthly-trend gates below force it False whenever they block.
+initiate_short = False
+
 # ===========================================================================
 # EXTRA FEEDS: credit, dollar, fiscal, calendar
 # ===========================================================================
@@ -1334,6 +1340,7 @@ mcclellan_divergence = (nymo_col == "red") and bool(_spx_near_high)
 if spx_above_200dma is True:
     _200dma_note = " | 200DMA GATE: SPX above 200MA (~%.0f) — cap short conviction YELLOW" % (spx_200dma or 0)
     primary = primary + _200dma_note
+    initiate_short = False  # 200DMA gate blocks: SPX above 200MA caps conviction
 elif spx_above_200dma is False:
     primary = primary + " | 200DMA: SPX BELOW 200MA — structural short regime valid"
 
@@ -1366,9 +1373,12 @@ else:
 # unknown, strip any INITIATE / SHORT NOW escalation already in the primary
 # verdict so the pill cannot show it.
 if spx_above_10mema is not False:
+    # Gate not open (SPX at/above 10M EMA, or unknown): INITIATE SHORT may not fire.
+    if initiate_short:
+        log.info("MONTHLY TREND GATE: blocking INITIATE SHORT (gate not open)")
+    initiate_short = False
     _pv_up = primary.upper()
     if "INITIATE" in _pv_up or "SHORT NOW" in _pv_up:
-        log.info("MONTHLY TREND GATE: blocking INITIATE SHORT (gate not open)")
         primary = primary.replace("INITIATE SHORT", "WATCHING").replace("INITIATE", "WATCHING").replace("SHORT NOW", "WATCHING")
 
 if spx_above_10mema is True:
@@ -1541,7 +1551,10 @@ def build_html():
         return str(s).replace("&","&amp;").replace("<","&lt;").replace(">","&gt;")
 
     pv = (primary or "").upper()
-    if "INITIATE" in pv or "SHORT NOW" in pv:
+    # Banner is driven by the explicit initiate_short flag, NOT by substring-
+    # matching words in the primary string (the gate notes mention "INITIATE
+    # SHORT blocked", which must never be read as a live INITIATE signal).
+    if initiate_short:
         b_txt, b_bg, b_fg, b_bdr = "INITIATE SHORT", "#ffebe9", RED, RED
     elif "WATCH" in pv:
         b_txt, b_bg, b_fg, b_bdr = "WATCHING", "#fff8c5", AMBER, AMBER
