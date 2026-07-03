@@ -11,7 +11,7 @@ name: MacroSage SHORT dashboard
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 22 * * 1-5'
+    - cron: '17 22 * * 1-5'
 
 # Allow the run to commit state.json (the last-known-value cache) back to the repo.
 permissions:
