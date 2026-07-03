@@ -1659,7 +1659,7 @@ def build_html():
           'Rules-based signal (not a weighted average). Each line: what it signals '
           '&amp; how it is used.</div>' % (FONT, MUTED)
         + ('<div style="%s">Gates &mdash; hard conditions that cap or open short conviction</div>' % _lg_hdr)
-        + _lgm(RED, "200DMA gate (tile 1)",
+        + _lgm(RED, "200DMA gate",
                "SPX vs its 200-day MA. Above = long-term uptrend intact, so short conviction is capped to caution (amber); below = structural short regime valid. Hard cap on conviction.")
         + _lgm(RED, "Calendar gate (tile 12)",
                "FOMC / OpEx proximity (the monthly-cycle gate). The Layer-2 ENTRY SIGNAL can only fire when the calendar is clear (no event within ~2 days). Hard AND-condition on entry.")
@@ -1673,13 +1673,13 @@ def build_html():
         + ('<div style="%s">Breadth / divergence</div>' % _lg_hdr)
         + _lgm(GREEN, "Market breadth (tile 7)",
                "% of names advancing. Below 50% = deteriorating participation; one of the two PRIMARY WATCHING triggers and feeds the decay streak.")
+        + _lgm(GREEN, "Net liquidity (tile 8)",
+               "Fed balance sheet minus TGA/RRP direction. Declining drains support; the co-equal PRIMARY WATCHING trigger paired with breadth (both RED = confirm the 3-day streak).")
         + _lgm(GREEN, "Breadth proxy RSP/SPY (tile 18)",
                "Equal-weight vs cap-weight direction. Narrowing while SPX near highs confirms a breadth divergence; broadening is healthy.")
         + _lgm(GREEN, "Breadth-decay streak",
                "Consecutive sessions of red breadth. Confirms persistence (the 3-day streak) rather than a one-day dip; context for the PRIMARY verdict.")
         + ('<div style="%s">Informational / tally &mdash; context + colour count, not gating</div>' % _lg_hdr)
-        + _lgm(MUTED, "Net liquidity (tile 8)",
-               "Fed balance sheet minus TGA/RRP direction. Declining drains support; the second PRIMARY WATCHING trigger alongside breadth.")
         + _lgm(MUTED, "Volatility / VIX (tile 2)", "Level of implied vol - overall risk temperature.")
         + _lgm(MUTED, "Rates / 2s10s (tile 3)", "Yield-curve slope; inversion is a recession/risk tell.")
         + _lgm(MUTED, "Credit spreads (tile 4)", "Stress in corporate credit - widening = risk-off.")
