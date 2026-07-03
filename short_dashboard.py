@@ -1,9 +1,7 @@
 #!/usr/bin/env python3
 """SHORT macro dashboard -> colored HTML email.
-
 Pulls live macro data (FMP /stable/, FRED, Yahoo Finance, CFTC), scores 18
 indicator tiles, and emails a colour-coded dashboard to the recipients.
-
 Hardened 2026-06-29:
   * every external call has a timeout + 3 retries with exponential backoff
   * every numeric metric is range-validated; anomalies are logged and dropped
@@ -12,7 +10,6 @@ Hardened 2026-06-29:
   * structured logging to stdout (visible in the GitHub Actions console)
   * US market-holiday detection (flags stale data, still sends)
   * a final summary line: "Run complete - X/18 signals retrieved, email sent: Y"
-
 Keys/secrets are read from environment variables (GitHub Actions Secrets) and
 fall back to a local .env for development. No third-party packages are required.
 """
@@ -29,7 +26,6 @@ import urllib.request
 import urllib.error
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-
 # ---------------------------------------------------------------------------
 # Encoding: force UTF-8 so non-ASCII API responses never crash the run.
 # ---------------------------------------------------------------------------
@@ -38,7 +34,6 @@ try:
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 except Exception:
     pass
-
 # ---------------------------------------------------------------------------
 # Logging
 # ---------------------------------------------------------------------------
@@ -49,18 +44,13 @@ logging.basicConfig(
     stream=sys.stdout,
 )
 log = logging.getLogger("short")
-
-
 def _utcnow():
     """Naive UTC timestamp (timezone-aware internally; avoids utcnow() deprecation)."""
     return datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
-
-
 HERE = os.path.dirname(os.path.abspath(__file__))
 STATE_PATH = os.path.join(HERE, "state.json")
-DEFAULT_RECIPIENTS = ["wolfgangduke@gmail.com"]
+DEFAULT_RECIPIENTS = ["wolfgangduke@gmail.com", "richard.macrae.gordon@gmail.com"]
 TOTAL_TILES = 18  # number of indicator tiles the engine computes
-
 # ---------------------------------------------------------------------------
 # Config / secrets
 # ---------------------------------------------------------------------------
@@ -76,20 +66,12 @@ def load_env():
     except FileNotFoundError:
         pass  # in GitHub Actions there is no .env; secrets come from os.environ
     return env
-
-
 ENV = load_env()
-
-
 def cfg(k):
     # env vars (Actions secrets) take precedence over .env
     return (os.environ.get(k) or ENV.get(k, "")).strip()
-
-
 FMP = cfg("FMP_API_KEY")
 FRED = cfg("FRED_API_KEY")
-
-
 def recipients():
     """Include the named recipient; merge in anything from MAIL_TO."""
     out = list(DEFAULT_RECIPIENTS)
@@ -100,10 +82,7 @@ def recipients():
             if "@" in part and part not in out:
                 out.append(part)
     return out
-
-
 RECIPIENTS = recipients()
-
 # ---------------------------------------------------------------------------
 # Last-known-value cache (persisted across runs via state.json, committed back
 # by the workflow). This is what lets a dead API fall back instead of crash.
@@ -120,11 +99,9 @@ class Cache:
             log.info("no state.json yet (first run); starting empty cache")
         except Exception as e:
             log.warning("could not read state.json (%s); starting empty", e)
-
     def get(self, key):
         rec = self.data.get(key)
         return rec.get("value") if isinstance(rec, dict) else None
-
     def get_age_days(self, key):
         rec = self.data.get(key)
         if not isinstance(rec, dict) or "ts" not in rec:
@@ -134,10 +111,8 @@ class Cache:
             return (_utcnow() - then).days
         except Exception:
             return None
-
     def set(self, key, value, ts):
         self.data[key] = {"value": value, "ts": ts}
-
     def save(self):
         try:
             with open(self.path, "w", encoding="utf-8") as f:
@@ -145,15 +120,10 @@ class Cache:
             log.info("saved %d values to state.json", len(self.data))
         except Exception as e:
             log.warning("could not write state.json: %s", e)
-
-
 CACHE = Cache(STATE_PATH)
 RUN_TS = _utcnow().isoformat(timespec="seconds")
-
 # Track how many tiles ended up with real (live or cached) data.
 TILES_WITH_DATA = 0
-
-
 def _redact(url):
     """Strip api keys out of a URL before logging it."""
     out = url
@@ -161,8 +131,6 @@ def _redact(url):
         if token:
             out = out.replace(token, "***")
     return out
-
-
 # ---------------------------------------------------------------------------
 # HTTP layer: timeout + retries + exponential backoff
 # ---------------------------------------------------------------------------
@@ -172,8 +140,6 @@ UA_HDR = {
 }
 # Client errors that will never succeed on retry (bad key, bad request, missing).
 NO_RETRY_CODES = {400, 401, 403, 404}
-
-
 def http_get_json(url, headers=None, timeout=15, retries=3, backoff=1.0):
     """GET a URL and parse JSON. Returns (data, error_string)."""
     last_err = None
@@ -203,14 +169,11 @@ def http_get_json(url, headers=None, timeout=15, retries=3, backoff=1.0):
             time.sleep(wait)
     log.warning("GET %s failed after %d attempts: %s", safe, retries, last_err)
     return None, last_err
-
-
 # ---------------------------------------------------------------------------
 # Validation + cache fallback for scalar metrics
 # ---------------------------------------------------------------------------
 def keep(name, value, lo=None, hi=None):
     """Validate a freshly-fetched scalar, cache it, or fall back to last-known.
-
     Returns (value, stale_flag). stale_flag is True when a cached value is used.
     """
     if value is not None:
@@ -235,8 +198,6 @@ def keep(name, value, lo=None, hi=None):
         return cached, True
     log.warning("metric %s: unavailable and no cached value", name)
     return None, False
-
-
 # ---------------------------------------------------------------------------
 # Data-source helpers
 # ---------------------------------------------------------------------------
@@ -246,8 +207,6 @@ def fmp(path):
     sep = "&" if "?" in path else "?"
     url = "https://financialmodelingprep.com/stable/%s%sapikey=%s" % (path, sep, FMP)
     return http_get_json(url)
-
-
 def fred_series(series, n=2):
     if not FRED:
         return None
@@ -263,8 +222,6 @@ def fred_series(series, n=2):
                 pass
         return out or None
     return None
-
-
 def yahoo_closes(symbol, n=6):
     url = ("https://query1.finance.yahoo.com/v8/finance/chart/%s"
            "?range=10d&interval=1d" % symbol)
@@ -275,24 +232,63 @@ def yahoo_closes(symbol, n=6):
         return vals or None
     except Exception:
         return None
-
-
 def cot_emini():
     url = ("https://publicreporting.cftc.gov/resource/gpe5-46if.json"
            "?$where=upper(contract_market_name)%20like%20'%25E-MINI%20S%26P%20500%25'"
            "&$order=report_date_as_yyyy_mm_dd%20DESC&$limit=1")
     d, _ = http_get_json(url, headers=UA_HDR)
     return d[0] if isinstance(d, list) and d else None
-
-
-
-
+# ---------------------------------------------------------------------------
+# WSJ Markets Diary — fetched ONCE per run, shared by NYMO and the breadth
+# fallback (the old Yahoo ^ADVN/^DECN fallback was dead: 401/404).
+# ---------------------------------------------------------------------------
+_WSJ_AD = {"fetched": False, "data": None}
+def fetch_wsj_ad():
+    """NYSE advances/declines from the WSJ Markets Diary JSON (free, no auth).
+    Returns {"adv":int,"dec":int,"adv_prv":int,"dec_prv":int} (any may be None)
+    or None on failure. Result is memoized for the run."""
+    if _WSJ_AD["fetched"]:
+        return _WSJ_AD["data"]
+    _WSJ_AD["fetched"] = True
+    try:
+        _wsj_url = (
+            "https://www.wsj.com/market-data/stocks/marketsdiary"
+            "?id=%7B%22application%22%3A%22WSJ%22"
+            "%2C%22marketsDiaryType%22%3A%22diaries%22%7D"
+            "&type=mdc_marketsdiary"
+        )
+        d, e = http_get_json(_wsj_url, headers=UA_HDR)
+        if not d:
+            log.warning("WSJ diaries: fetch failed (%s)", e)
+            return None
+        _sets = d.get("data", {}).get("instrumentSets", [])
+        _nyse = next((s for s in _sets
+            if (s.get("headerFields") or [{}])[0].get("label", "").upper() == "NYSE"),
+            None)
+        if not _nyse:
+            log.warning("WSJ diaries: NYSE set not found")
+            return None
+        def _val(instr, row_id, field):
+            row = next((r for r in instr if r.get("id") == row_id), None)
+            if not row:
+                return None
+            raw = str(row.get(field, "")).replace(",", "").strip()
+            return int(float(raw)) if raw else None
+        _instr = _nyse.get("instruments", [])
+        out = {
+            "adv": _val(_instr, "advances", "latestClose"),
+            "dec": _val(_instr, "declines", "latestClose"),
+            "adv_prv": _val(_instr, "advances", "previousClose"),
+            "dec_prv": _val(_instr, "declines", "previousClose"),
+        }
+        _WSJ_AD["data"] = out
+        return out
+    except Exception as ex:
+        log.warning("WSJ diaries error: %s", ex)
+        return None
 # ===========================================================================
 # LIVE INDICATOR FETCHERS  (live-indicators branch, 2026-06-30)
-# Each returns a dict with typed values on success, None on any failure so
-# the caller can gracefully fall back.
 # ===========================================================================
-
 def _http_get_text(url, headers=None, timeout=20, retries=2, backoff=1.5):
     """Like http_get_json but returns raw text (for scraping)."""
     last_err = None
@@ -311,8 +307,6 @@ def _http_get_text(url, headers=None, timeout=20, retries=2, backoff=1.5):
                 time.sleep(backoff * attempt)
     log.warning("scrape %s failed after %d attempts: %s", safe, retries, last_err)
     return None, last_err
-
-
 def _re_first(pattern, text, cast=float, default=None):
     """Return first regex group from text cast to type, or default."""
     if not text:
@@ -325,74 +319,22 @@ def _re_first(pattern, text, cast=float, default=None):
         return cast(m.group(1).replace(",", ""))
     except Exception:
         return default
-
-
-
-
 def fetch_ad_series(n=60):
-    """Fetch NYSE advancing/declining issues as a net-advances series.
-    Primary : WSJ Markets Diary JSON (wsj.com, free, no auth, 2 sessions/call).
-    Secondary: Finviz homepage HTML (today only; PRE-MARKET returns 0/0 - rejected).
-               NOTE: FMP v3 historical-price-full ^ADVN/^DECN was removed (dead:
-               returned HTTP 403 - legacy /api/v3/ index endpoint no longer entitled).
-    # DEAD (removed): FMP v3 ^ADVN/^DECN -> 403; FMP stable ^ADVN -> 404; Yahoo v7/v8 -> 401/404.
-    Returns  : list of net_adv (int) oldest-first, >=40 sessions on success, or None.
-    Logs WARNING and returns None if all sources fail — caller uses last-known cache.
-    """
-    import datetime as _dt
-
-    t_end = _dt.date.today()
-    t_start = t_end - _dt.timedelta(days=n * 2)  # 2x buffer for weekends/holidays
-
-    # --- Primary: WSJ Markets Diary JSON (free, no auth, NYSE daily A/D, 2 sessions) ---
-    # Endpoint: https://www.wsj.com/market-data/stocks/marketsdiary
-    #   ?id={"application":"WSJ","marketsDiaryType":"diaries"}&type=mdc_marketsdiary
-    # Returns instrumentSets[0]=NYSE with advances/declines for latestClose+previousClose.
     try:
-        _wsj_url = (
-            "https://www.wsj.com/market-data/stocks/marketsdiary"
-            "?id=%7B%22application%22%3A%22WSJ%22"
-            "%2C%22marketsDiaryType%22%3A%22diaries%22%7D"
-            "&type=mdc_marketsdiary"
-        )
-        _wsj_d, _wsj_e = http_get_json(_wsj_url, headers=UA_HDR)
-        if _wsj_d:
-            _sets = _wsj_d.get("data", {}).get("instrumentSets", [])
-            _nyse = next((s for s in _sets
-                if (s.get("headerFields") or [{}])[0].get("label","").upper() == "NYSE"),
-                None)
-            if _nyse:
-                def _wsj_val(instr, row_id, field):
-                    row = next((r for r in instr if r.get("id") == row_id), None)
-                    if not row: return None
-                    raw = str(row.get(field, "")).replace(",", "").strip()
-                    return int(float(raw)) if raw else None
-                _instr = _nyse.get("instruments", [])
-                _adv_cur = _wsj_val(_instr, "advances", "latestClose")
-                _dec_cur = _wsj_val(_instr, "declines", "latestClose")
-                _adv_prv = _wsj_val(_instr, "advances", "previousClose")
-                _dec_prv = _wsj_val(_instr, "declines", "previousClose")
-                _sess = []
-                if _adv_prv is not None and _dec_prv is not None:
-                    _sess.append(_adv_prv - _dec_prv)  # older session first
-                if _adv_cur is not None and _dec_cur is not None:
-                    _sess.append(_adv_cur - _dec_cur)
-                if _sess:
-                    log.info("NYMO A/D: WSJ diaries NYSE, %d sessions (adv=%s dec=%s)",
-                            len(_sess), _adv_cur, _dec_cur)
-                    return _sess[-n:]
-                else:
-                    log.warning("NYMO A/D WSJ: advances/declines missing in NYSE set")
-            else:
-                log.warning("NYMO A/D WSJ: NYSE set not found in response")
-        else:
-            log.warning("NYMO A/D WSJ: fetch failed (%s)", _wsj_e)
+        _w = fetch_wsj_ad()
+        if _w:
+            _sess = []
+            if _w["adv_prv"] is not None and _w["dec_prv"] is not None:
+                _sess.append(_w["adv_prv"] - _w["dec_prv"])  # older session first
+            if _w["adv"] is not None and _w["dec"] is not None:
+                _sess.append(_w["adv"] - _w["dec"])
+            if _sess:
+                log.info("NYMO A/D: WSJ diaries NYSE, %d sessions (adv=%s dec=%s)",
+                         len(_sess), _w["adv"], _w["dec"])
+                return _sess[-n:]
+            log.warning("NYMO A/D WSJ: advances/declines missing in NYSE set")
     except Exception as ex:
         log.warning("NYMO A/D WSJ error: %s", ex)
-
-    # --- Secondary: Finviz homepage HTML (TODAY ONLY; PRE-MARKET returns 0/0) ---
-    # WARNING: This path returns a single-session series. NYMO will be warm=True.
-    # The pre-market 0/0 guard below prevents seeding EMAs with garbage.
     try:
         fv_html, _ = _http_get_text("https://finviz.com/")
         if fv_html:
@@ -413,63 +355,54 @@ def fetch_ad_series(n=60):
             log.warning("NYMO A/D Finviz: fetch failed")
     except Exception as ex:
         log.warning("NYMO A/D Finviz error: %s", ex)
-
     log.warning("NYMO A/D: ALL sources failed (WSJ, Finviz) — NYMO will use cache")
     return None
-
-
 def compute_nymo(cache):
-    """Self-compute NYMO = EMA19(net_adv) - EMA39(net_adv).
-    Fetches A/D series via fetch_ad_series().
-    With historical data (>=2 sessions) backfills EMAs immediately.
-    Persists nymo_ema19, nymo_ema39 in state.json across runs.
-    Returns {"nymo": float, "warming_up": bool} or None on data failure.
-    """
     series = fetch_ad_series(60)
     if not series:
         log.warning("NYMO compute: A/D data unavailable")
         return None
-
     mult19 = 2.0 / (19 + 1)
     mult39 = 2.0 / (39 + 1)
-
     prev19 = cache.get("nymo_ema19")
     prev39 = cache.get("nymo_ema39")
-
     if prev19 is None and len(series) > 1:
-        # Backfill EMAs from historical series (seed from first session)
         ema19 = ema39 = float(series[0])
         for net_adv in series[1:]:
             ema19 = net_adv * mult19 + ema19 * (1 - mult19)
             ema39 = net_adv * mult39 + ema39 * (1 - mult39)
         warming_up = len(series) < 39
         if not warming_up:
-            cache.set("nymo_warmed", 1.0, RUN_TS)  # persist: once warm stays warm
+            cache.set("nymo_warmed", 1.0, RUN_TS)
+        mark_session(cache, "nymo_session")
     elif prev19 is None:
-        # First run, today-only data: seed and flag warming up
         ema19 = ema39 = float(series[-1])
         warming_up = True
+        mark_session(cache, "nymo_session")
     else:
+        # SESSION GUARD (added 2026-07-03): only fold today's net-advance into
+        # the EMAs ONCE per US trading day. Weekend/holiday runs and repeated
+        # same-day runs previously re-applied the same session repeatedly,
+        # silently distorting the oscillator.
+        if not is_new_session(cache, "nymo_session"):
+            cached_nymo = cache.get("nymo")
+            warming_up = not bool(cache.get("nymo_warmed"))
+            if cached_nymo is not None:
+                log.info("NYMO: same/non-trading session — reusing %.2f, EMAs not advanced",
+                         cached_nymo)
+                return {"nymo": cached_nymo, "warming_up": warming_up}
         net_adv = series[-1]
         ema19 = net_adv * mult19 + prev19 * (1 - mult19)
         ema39 = net_adv * mult39 + prev39 * (1 - mult39)
-        # Once fully warmed by historical backfill, stay warmed forever.
-        # nymo_warmed cached as 1.0 (True) / absent (False) in state.json.
         warming_up = not bool(cache.get("nymo_warmed"))
-
+        mark_session(cache, "nymo_session")
     cache.set("nymo_ema19", round(ema19, 4), RUN_TS)
     cache.set("nymo_ema39", round(ema39, 4), RUN_TS)
-
     nymo = round(ema19 - ema39, 2)
     log.info("NYMO computed = %.2f (ema19=%.2f, ema39=%.2f, warm=%s, sessions=%d)",
              nymo, ema19, ema39, warming_up, len(series))
     return {"nymo": nymo, "warming_up": warming_up}
-
 def fetch_naaim():
-    """Fetch latest NAAIM Exposure Index by scraping the HTML table on naaim.org.
-    The table is server-rendered (no JS needed). Rows: MM/DD/YYYY | value | ...
-    Returns {"naaim": float} or None on failure.
-    """
     text, err = _http_get_text(
         "https://naaim.org/programs/naaim-exposure-index/",
         timeout=25,
@@ -478,7 +411,6 @@ def fetch_naaim():
         log.warning("NAAIM: page fetch failed (%s)", err)
         return None
     import re as _re
-    # Match first table row with MM/DD/YYYY date and float value
     m = _re.search(
         r'(\d{2}/\d{2}/\d{4})</td>\s*<td>([\d.]+)</td>',
         text
@@ -493,18 +425,10 @@ def fetch_naaim():
             pass
     log.warning("NAAIM: page fetched (%d chars) but table not parseable", len(text))
     return None
-
-
 def fetch_aaii():
-    """Fetch latest AAII sentiment from aaii.com.
-    Returns {"bull": float, "bear": float} or None on failure.
-    """
-    # AAII publishes sentiment on its landing page - scrape it
-    # Scrape the landing page for the latest bull/bear percentages
     text2, err2 = _http_get_text("https://www.aaii.com/sentimentsurvey/sent_results", timeout=20)
     if text2:
         import re as _re
-        # Typical page has "Bullish: XX.X%" and "Bearish: XX.X%"
         bull_m = _re.search(r'Bullish.*?(\d+\.?\d*)\s*%', text2, _re.IGNORECASE | _re.DOTALL)
         bear_m = _re.search(r'Bearish.*?(\d+\.?\d*)\s*%', text2, _re.IGNORECASE | _re.DOTALL)
         if bull_m and bear_m:
@@ -518,12 +442,7 @@ def fetch_aaii():
                 pass
     log.warning("AAII: all fetches failed (%s)", err2)
     return None
-
-
 def fetch_cot_tradingster():
-    """Fallback COT source: Tradingster.com for ES E-mini positions.
-    Returns a dict compatible with the main cot_emini() output or None.
-    """
     text, err = _http_get_text(
         "https://www.tradingster.com/cot/futures/fin/13874A",
         timeout=20,
@@ -532,30 +451,35 @@ def fetch_cot_tradingster():
         log.warning("Tradingster COT fetch error: %s", err)
         return None
     import re as _re
-    # Tradingster shows "Asset Manager - Long: X,XXX / Short: X,XXX"
-    am_l = _re_first(r'Asset Manager.*?Long.*?([\d,]+)', text, cast=lambda x: float(x.replace(",","")))
-    am_s = _re_first(r'Asset Manager.*?Short.*?([\d,]+)', text, cast=lambda x: float(x.replace(",","")))
-    lev_l = _re_first(r'Leveraged.*?Long.*?([\d,]+)', text, cast=lambda x: float(x.replace(",","")))
-    lev_s = _re_first(r'Leveraged.*?Short.*?([\d,]+)', text, cast=lambda x: float(x.replace(",","")))
-    if am_l and am_s and lev_l and lev_s:
+    # FIXED 2026-07-03: patterns previously lacked DOTALL so '.' never crossed
+    # the newlines inside the HTML table and the fallback could never match.
+    # Also switched the truthiness test to `is not None` so a legitimate zero
+    # position no longer discards the whole result.
+    def _tg(pat):
+        m = _re.search(pat, text, _re.DOTALL | _re.IGNORECASE)
+        if not m:
+            return None
+        try:
+            return float(m.group(1).replace(",", ""))
+        except Exception:
+            return None
+    am_l = _tg(r'Asset Manager[^<]*(?:<[^>]*>\s*)*?([\d,]{3,})')
+    am_l = _tg(r'Asset Manager.*?Long.*?([\d,]+)') if am_l is None else am_l
+    am_s = _tg(r'Asset Manager.*?Short.*?([\d,]+)')
+    lev_l = _tg(r'Leveraged.*?Long.*?([\d,]+)')
+    lev_s = _tg(r'Leveraged.*?Short.*?([\d,]+)')
+    if all(v is not None for v in (am_l, am_s, lev_l, lev_s)):
         return {
             "asset_mgr_positions_long": am_l,
             "asset_mgr_positions_short": am_s,
             "lev_money_positions_long": lev_l,
             "lev_money_positions_short": lev_s,
-            "change_in_lev_money_long": 0,   # Tradingster may not expose deltas
+            "change_in_lev_money_long": 0,
             "change_in_lev_money_short": 0,
             "_source": "tradingster",
         }
     return None
-
-
 def _yahoo_closes_range(symbol, rng="6mo"):
-    """Daily closes (oldest-first) over a longer window than yahoo_closes().
-    yahoo_closes() hard-codes range=10d (fine for 1-2 day deltas) but the
-    breadth proxy needs >=60 sessions for a 50-day SMA, so this uses a wider
-    range. Returns list[float] oldest-first or None on failure.
-    """
     url = ("https://query1.finance.yahoo.com/v8/finance/chart/%s"
            "?range=%s&interval=1d" % (symbol, rng))
     d, _ = http_get_json(url, headers=UA_HDR)
@@ -565,32 +489,31 @@ def _yahoo_closes_range(symbol, rng="6mo"):
         return vals or None
     except Exception:
         return None
-
-
+def _yahoo_monthly_closes(symbol, rng="3y"):
+    url = ("https://query1.finance.yahoo.com/v8/finance/chart/%s"
+           "?range=%s&interval=1mo" % (symbol, rng))
+    d, _ = http_get_json(url, headers=UA_HDR)
+    try:
+        q = d["chart"]["result"][0]["indicators"]["quote"][0]["close"]
+        vals = [float(c) for c in q if c is not None]
+        return vals or None
+    except Exception:
+        return None
+def _ema(values, period):
+    if not values or len(values) < period:
+        return None
+    k = 2.0 / (period + 1)
+    ema = sum(values[:period]) / float(period)  # SMA seed
+    for v in values[period:]:
+        ema = v * k + ema * (1 - k)
+    return ema
 def fetch_rsp_spy_ratio(n=120):
-    """Equal-weight vs cap-weight breadth proxy: daily RSP/SPY close ratio.
-
-    A rising RSP/SPY ratio means the average stock is outperforming the
-    mega-cap-dominated index -> breadth BROADENING. A falling ratio means
-    gains are concentrating in the largest names -> breadth NARROWING.
-
-    Free / no-paid-tier sources, in order:
-      Primary  : Yahoo v8 chart API (keyless, returns ~60-120 sessions on
-                 range=6mo; verified to serve both RSP and SPY).
-      Secondary: Stooq CSV (keyless; may be rate-limited from some IPs).
-                 NOTE: FMP /api/v3/historical-price-full removed (legacy; HTTP 403).
-
-    Returns list[float] of daily ratios oldest-first (>=60 on success) or
-    None if no source yields aligned RSP+SPY history (caller uses cache).
-    """
-    # --- Primary: Yahoo (keyless) ---
     try:
         rsp = _yahoo_closes_range("RSP", "6mo")
         spy = _yahoo_closes_range("SPY", "6mo")
         if rsp and spy:
             m = min(len(rsp), len(spy))
             if m >= 60:
-                # align on the most recent m sessions (both feeds same calendar)
                 ratio = [rsp[-m + i] / spy[-m + i] for i in range(m)
                          if spy[-m + i]]
                 if len(ratio) >= 60:
@@ -603,8 +526,6 @@ def fetch_rsp_spy_ratio(n=120):
                         "ok" if rsp else "None", "ok" if spy else "None")
     except Exception as ex:
         log.warning("breadth proxy Yahoo error: %s", ex)
-
-    # --- Secondary: Stooq CSV (keyless) ---
     try:
         def _stooq_closes(symbol):
             url = "https://stooq.com/q/d/l/?s=%s&i=d" % symbol
@@ -614,7 +535,7 @@ def fetch_rsp_spy_ratio(n=120):
                 return None
             lines = text.strip().splitlines()
             closes = []
-            for row in lines[1:]:  # Stooq daily CSV is oldest-first
+            for row in lines[1:]:
                 parts = row.split(",")
                 if len(parts) >= 5:
                     try:
@@ -622,7 +543,6 @@ def fetch_rsp_spy_ratio(n=120):
                     except (ValueError, IndexError):
                         pass
             return closes or None
-
         rsp = _stooq_closes("rsp.us")
         spy = _stooq_closes("spy.us")
         if rsp and spy:
@@ -636,20 +556,9 @@ def fetch_rsp_spy_ratio(n=120):
             log.warning("breadth proxy Stooq: too few aligned sessions")
     except Exception as ex:
         log.warning("breadth proxy Stooq error: %s", ex)
-
     log.warning("breadth proxy: ALL sources failed (Yahoo, FMP v3, Stooq) - using cache")
     return None
-
-
 def _yahoo_closes_dated(symbol, rng="6mo"):
-    """Daily closes as an ordered {date: close} map (oldest-first insertion).
-
-    Same wider Yahoo fetcher used for RSP/SPY and the 200DMA gate
-    (range=rng, ~60-126 sessions), but keyed by session date so two
-    series can be aligned on a common trading day rather than blindly by
-    -1 index (Yahoo occasionally drops a single session for one symbol).
-    Returns dict[str,float] or None on failure.
-    """
     url = ("https://query1.finance.yahoo.com/v8/finance/chart/%s"
            "?range=%s&interval=1d" % (symbol, rng))
     d, _ = http_get_json(url, headers=UA_HDR)
@@ -665,24 +574,7 @@ def _yahoo_closes_dated(symbol, rng="6mo"):
         return out or None
     except Exception:
         return None
-
-
 def compute_vix_term_structure(cache):
-    """VIX vs VIX3M term-structure regime (replaces the paywalled GEX tile).
-
-    ratio = VIX / VIX3M, measured on the most recent COMMON trading day.
-      ratio <  1.00 -> CONTANGO      (calm, vol-suppressing)
-      ratio >= 1.00 -> BACKWARDATION (stress, vol-amplifying)
-
-    Front-month ^VIX here is the SAME series feeding tile #2 (Volatility);
-    on the Starter FMP tier index quotes are gated, so both legs use the
-    keyless wider Yahoo fetcher for consistency.
-
-    Persists a backwardation_streak in state.json (integer, same shape as
-    breadth_proxy_streak / breadth_decay_streak). Returns dict or None:
-      {"vix": float, "vix3m": float, "ratio": float, "regime": str,
-       "streak": int, "date": str, "stale": bool}
-    """
     vix_map = _yahoo_closes_dated("%5EVIX", "6mo")
     v3_map = _yahoo_closes_dated("%5EVIX3M", "6mo")
     if vix_map and v3_map:
@@ -695,7 +587,15 @@ def compute_vix_term_structure(cache):
                 ratio = vix / v3
                 regime = "BACKWARDATION" if ratio >= 1.0 else "CONTANGO"
                 prev = int(cache.get("backwardation_streak") or 0)
-                streak = prev + 1 if regime == "BACKWARDATION" else 0
+                # DATE GUARD (2026-07-03): only advance the streak when the
+                # underlying data session actually changed (weekend/holiday and
+                # repeated same-day runs no longer inflate it).
+                _last_day = cache.get("vix_ts_last_day")
+                if regime == "BACKWARDATION":
+                    streak = prev + 1 if day != _last_day else max(prev, 1)
+                else:
+                    streak = 0
+                cache.set("vix_ts_last_day", day, RUN_TS)
                 cache.set("vix_ts_vix", round(vix, 2), RUN_TS)
                 cache.set("vix_ts_vix3m", round(v3, 2), RUN_TS)
                 cache.set("vix_ts_ratio", round(ratio, 4), RUN_TS)
@@ -714,7 +614,6 @@ def compute_vix_term_structure(cache):
     else:
         log.warning("VIX term structure: Yahoo fetch failed (vix=%s vix3m=%s)",
                     "ok" if vix_map else "None", "ok" if v3_map else "None")
-    # Fallback to last-known regime without advancing the streak.
     cached = cache.get("vix_ts_ratio")
     if cached is not None:
         log.warning("VIX term structure: live unavailable; using last-known")
@@ -724,19 +623,7 @@ def compute_vix_term_structure(cache):
                 "date": None, "stale": True}
     log.warning("VIX term structure: no data and no cache")
     return None
-
-
 def compute_breadth_proxy(cache):
-    """Compute RSP/SPY breadth-proxy direction + streak from the ratio series.
-
-    Directional / relative only (NOT a precise %): we report whether the ratio
-    is rising vs its 50-day SMA and its short slope. Persists the running
-    same-direction streak in state.json alongside breadth_decay_streak.
-
-    Returns dict or None on data failure:
-      {"ratio": float, "sma50": float, "slope": float,
-       "direction": "BROADENING"|"NARROWING", "streak": int, "stale": bool}
-    """
     series = fetch_rsp_spy_ratio(120)
     stale = False
     if not series or len(series) < 50:
@@ -744,7 +631,6 @@ def compute_breadth_proxy(cache):
         if cached is None:
             log.warning("breadth proxy: no data and no cache")
             return None
-        # Fall back to last-known direction/streak without advancing the streak.
         log.warning("breadth proxy: live unavailable; using last-known")
         return {
             "ratio": cached,
@@ -754,25 +640,26 @@ def compute_breadth_proxy(cache):
             "streak": int(cache.get("breadth_proxy_streak") or 0),
             "stale": True,
         }
-
     ratio = series[-1]
     sma50 = sum(series[-50:]) / 50.0
-    # slope over the last N sessions (default 5): simple end-vs-start delta
     N = 5
     window = series[-(N + 1):] if len(series) > N else series
     slope = (window[-1] - window[0]) / max(len(window) - 1, 1)
-    # Direction: rising AND above its 50-day MA -> BROADENING; else NARROWING.
     rising = slope > 0
     above_ma = ratio >= sma50
     direction = "BROADENING" if (rising and above_ma) else "NARROWING"
-
     prev_dir = cache.get("breadth_proxy_dir")
     prev_streak = int(cache.get("breadth_proxy_streak") or 0)
+    # SESSION GUARD (2026-07-03): streak counts trading sessions, not runs.
     if direction == prev_dir:
-        streak = prev_streak + 1
+        if is_new_session(cache, "bp_session"):
+            streak = prev_streak + 1
+            mark_session(cache, "bp_session")
+        else:
+            streak = max(prev_streak, 1)
     else:
         streak = 1
-
+        mark_session(cache, "bp_session")
     cache.set("breadth_proxy_ratio", round(ratio, 6), RUN_TS)
     cache.set("breadth_proxy_sma50", round(sma50, 6), RUN_TS)
     cache.set("breadth_proxy_slope", round(slope, 8), RUN_TS)
@@ -782,18 +669,11 @@ def compute_breadth_proxy(cache):
              ratio, sma50, slope, direction, streak)
     return {"ratio": ratio, "sma50": sma50, "slope": slope,
             "direction": direction, "streak": streak, "stale": False}
-
-
 def num(x):
     try:
         return float(x)
     except (TypeError, ValueError):
         return None
-
-
-# ---------------------------------------------------------------------------
-# US market-holiday calendar (NYSE) - so a holiday run is flagged, not silent
-# ---------------------------------------------------------------------------
 def _easter(year):
     a = year % 19
     b, c = divmod(year, 100)
@@ -806,54 +686,43 @@ def _easter(year):
     n = (a + 11 * h + 22 * m) // 451
     month, day = divmod(h + m - 7 * n + 114, 31)
     return datetime.date(year, month, day + 1)
-
-
 def _nth_weekday(year, month, weekday, n):
     days = [d for d in _cal.Calendar().itermonthdates(year, month)
             if d.month == month and d.weekday() == weekday]
     return days[n - 1]
-
-
 def _last_weekday(year, month, weekday):
     days = [d for d in _cal.Calendar().itermonthdates(year, month)
             if d.month == month and d.weekday() == weekday]
     return days[-1]
-
-
 def _observed(d):
-    if d.weekday() == 5:   # Saturday -> Friday
+    if d.weekday() == 5:
         return d - datetime.timedelta(days=1)
-    if d.weekday() == 6:   # Sunday -> Monday
+    if d.weekday() == 6:
         return d + datetime.timedelta(days=1)
     return d
-
-
 def market_holidays(year):
     h = set()
-    h.add(_observed(datetime.date(year, 1, 1)))            # New Year's Day
-    h.add(_nth_weekday(year, 1, 0, 3))                     # MLK Day (3rd Mon Jan)
-    h.add(_nth_weekday(year, 2, 0, 3))                     # Presidents' Day
-    h.add(_easter(year) - datetime.timedelta(days=2))     # Good Friday
-    h.add(_last_weekday(year, 5, 0))                       # Memorial Day
-    h.add(_observed(datetime.date(year, 6, 19)))          # Juneteenth
-    h.add(_observed(datetime.date(year, 7, 4)))           # Independence Day
-    h.add(_nth_weekday(year, 9, 0, 1))                    # Labor Day
-    h.add(_nth_weekday(year, 11, 3, 4))                  # Thanksgiving (4th Thu)
-    h.add(_observed(datetime.date(year, 12, 25)))         # Christmas
+    h.add(_observed(datetime.date(year, 1, 1)))
+    h.add(_nth_weekday(year, 1, 0, 3))
+    h.add(_nth_weekday(year, 2, 0, 3))
+    h.add(_easter(year) - datetime.timedelta(days=2))
+    h.add(_last_weekday(year, 5, 0))
+    h.add(_observed(datetime.date(year, 6, 19)))
+    h.add(_observed(datetime.date(year, 7, 4)))
+    h.add(_nth_weekday(year, 9, 0, 1))
+    h.add(_nth_weekday(year, 11, 3, 4))
+    h.add(_observed(datetime.date(year, 12, 25)))
     return h
-
-
-def eastern_today():
-    """Current US/Eastern calendar date, with a dependency-free DST estimate."""
+def eastern_now():
+    """Current US/Eastern datetime, dependency-free DST estimate."""
     utc = _utcnow()
     y = utc.year
-    dst_start = _nth_weekday(y, 3, 6, 2)   # 2nd Sunday in March
-    dst_end = _nth_weekday(y, 11, 6, 1)    # 1st Sunday in November
+    dst_start = _nth_weekday(y, 3, 6, 2)
+    dst_end = _nth_weekday(y, 11, 6, 1)
     is_dst = dst_start <= utc.date() < dst_end
-    offset = 4 if is_dst else 5            # EDT = UTC-4, EST = UTC-5
-    return (utc - datetime.timedelta(hours=offset)).date()
-
-
+    return utc - datetime.timedelta(hours=4 if is_dst else 5)
+def eastern_today():
+    return eastern_now().date()
 ET_TODAY = eastern_today()
 IS_HOLIDAY = ET_TODAY in market_holidays(ET_TODAY.year)
 IS_WEEKEND = ET_TODAY.weekday() >= 5
@@ -863,14 +732,23 @@ elif IS_WEEKEND:
     log.warning("US market closed (weekend, %s ET) - data may be stale", ET_TODAY)
 else:
     log.info("US trading day: %s ET", ET_TODAY)
-
-
-# ===========================================================================
-# GATHER LIVE DATA
-# ===========================================================================
+# ---------------------------------------------------------------------------
+# SESSION GUARDS (added 2026-07-03). All persisted streaks and incremental
+# EMAs must advance at most ONCE per US trading day. Weekend/holiday runs and
+# multiple same-day runs previously re-counted the same session, inflating
+# streaks and corrupting the NYMO EMAs in state.json.
+# ---------------------------------------------------------------------------
+def is_new_session(cache, key):
+    """True when today is a US trading day AND this guard-key hasn't been
+    advanced yet today. Weekends/holidays never count as a new session."""
+    if IS_WEEKEND or IS_HOLIDAY:
+        return False
+    return cache.get(key) != ET_TODAY.isoformat()
+def mark_session(cache, key):
+    if not (IS_WEEKEND or IS_HOLIDAY):
+        cache.set(key, ET_TODAY.isoformat(), RUN_TS)
 log.info("=== gathering live data (FMP key: %s, FRED key: %s) ===",
          "set" if FMP else "MISSING", "set" if FRED else "MISSING")
-
 D = {}
 for key, path in [
     ("spy", "quote?symbol=SPY"),
@@ -883,36 +761,26 @@ for key, path in [
         D[key] = d[0] if isinstance(d, list) and d else d
     else:
         log.warning("FMP %s unavailable (%s)", key, e)
-
-# sector breadth (may be gated on some plans)
 sectors, e = fmp("sector-performance-snapshot?date=%s" % datetime.date.today().isoformat())
 if not sectors:
     sectors, e = fmp("sector-performance-snapshot")
-
-# ---- raw scalars with validation + cache fallback ----
 spy = D.get("spy", {}) if isinstance(D.get("spy"), dict) else {}
 spy_px, _ = keep("spy_px", num(spy.get("price")), 50, 2000)
 spy_chg, _ = keep("spy_chg", num(spy.get("changePercentage")), -25, 25)
 spx_proxy = spy_px * 10 if spy_px is not None else None
-
 vix_px, _ = keep("vix_px", num(D.get("vix", {}).get("price")
                                if isinstance(D.get("vix"), dict) else None), 5, 150)
 gold_px, _ = keep("gold_px", num(D.get("gold", {}).get("price")
                                  if isinstance(D.get("gold"), dict) else None), 200, 10000)
-
 t = D.get("treasury", {}) if isinstance(D.get("treasury"), dict) else {}
 y2, _ = keep("y2", num(t.get("year2")), -2, 25)
 y10, _ = keep("y10", num(t.get("year10")), -2, 25)
 spread_bps = round((y10 - y2) * 100) if (y2 is not None and y10 is not None) else None
-
-
 def sector_chg(s):
     for f in ("changesPercentage", "averageChange", "changePercentage", "changePct"):
         if f in s:
             return num(s[f])
     return None
-
-
 breadth = None
 up = down = 0
 if sectors and isinstance(sectors, list):
@@ -926,25 +794,22 @@ if sectors and isinstance(sectors, list):
             down += 1
     if up + down:
         breadth = round(up / (up + down) * 100)
-# fallback: Yahoo Finance advance/decline if FMP sectors unavailable
+# fallback: WSJ NYSE advances/declines (the old Yahoo ^ADVN/^DECN endpoints
+# are dead — 401/404 — see fetch_ad_series comments). Shares the memoized
+# fetch with the NYMO tile, so this costs no extra HTTP call.
 if breadth is None:
     try:
-        _adv = yahoo_closes("%5EADVN", 1)
-        _dec = yahoo_closes("%5EDECN", 1)
-        if _adv and _dec and _adv[0] and _dec[0]:
-            up = int(_adv[0])
-            down = int(_dec[0])
+        _w = fetch_wsj_ad()
+        if _w and _w["adv"] is not None and _w["dec"] is not None:
+            up, down = _w["adv"], _w["dec"]
             if up + down:
                 breadth = round(up / (up + down) * 100)
+                log.info("breadth: WSJ NYSE A/D fallback -> %d%% advancing", breadth)
     except Exception as ex:
-        log.warning("breadth Yahoo fallback failed: %s", ex)
+        log.warning("breadth WSJ fallback failed: %s", ex)
 breadth, _ = keep("breadth", breadth, 0, 100)
 if breadth is not None:
     breadth = int(round(breadth))
-
-# ---- net liquidity, all converted to $bn ----
-# FRED units (verified): WALCL = millions, WTREGEN (TGA) = millions,
-# RRPONTSYD (RRP) = billions. So WALCL and TGA are /1000; RRP is used as-is.
 netliq = None
 walcl = fred_series("WALCL")
 tga = fred_series("WTREGEN")
@@ -954,7 +819,6 @@ if walcl and tga and rrp and len(walcl) >= 2:
         cur = walcl[0] / 1000.0 - tga[0] / 1000.0 - rrp[0]
         prv = (walcl[1] / 1000.0 - tga[min(1, len(tga) - 1)] / 1000.0
                - rrp[min(1, len(rrp) - 1)])
-        # sanity: US net liquidity is on the order of a few $trillion (in $bn here)
         if -2000 < cur < 12000 and -2000 < prv < 12000:
             netliq = (cur, prv)
             CACHE.set("netliq_cur", cur, RUN_TS)
@@ -970,14 +834,9 @@ if netliq is None:
     if cc is not None and cp is not None:
         netliq = (cc, cp)
         log.warning("net liquidity: using last-known values")
-
 netliq_dir = None
 if netliq:
     netliq_dir = "declining" if netliq[0] < netliq[1] else "rising"
-
-# ===========================================================================
-# VERDICTS
-# ===========================================================================
 breadth_red = breadth is not None and breadth < 50
 netliq_decl = netliq_dir == "declining"
 if breadth_red and netliq_decl:
@@ -985,20 +844,13 @@ if breadth_red and netliq_decl:
 else:
     primary = "WATCHING - Day 1 of 3"
 layer2 = "WAIT"
-
-# ===========================================================================
-# EXTRA FEEDS: credit, dollar, fiscal, calendar
-# ===========================================================================
+initiate_short = False
 PAL = {"red": ("#fcebeb", "#e24b4a", "#791f1f"),
        "amber": ("#faeeda", "#ef9f27", "#633806"),
        "green": ("#eaf3de", "#639922", "#27500a"),
        "gray": ("#f1efe8", "#888780", "#444441")}
-
-
 def fmt_money(v):
     return "n/a" if v is None else ("{:,.0f}".format(v))
-
-
 hy = fred_series("BAMLH0A0HYM2", 2)
 credit_sub, credit_col = "no data", "gray"
 if hy and len(hy) >= 2:
@@ -1010,7 +862,6 @@ else:
     c = CACHE.get("hy_oas")
     if c is not None:
         credit_sub, credit_col = "HY OAS %.2f%% (last known)" % c, "amber"
-
 dxy = fred_series("DTWEXBGS", 2)
 usd_sub, usd_col = "no data", "gray"
 if dxy and len(dxy) >= 2:
@@ -1022,28 +873,64 @@ else:
     c = CACHE.get("dxy")
     if c is not None:
         usd_sub, usd_col = "Broad $ %.1f (last known)" % c, "amber"
-
-mts = fred_series("MTSDS133FMS", 12)
+# ---- Fiscal impulse (full Point-19 MTS spec, 2026-07-03) ----
+#   RED   : rolling-12M deficit > $2.0T AND YoY outlays > +8%
+#   AMBER : deficit $1.5-2.0T OR outlays +5-8%
+#   GREEN : below both
+#   Sub-note: gross interest / receipts ⚠ if > 13%
+#   Appends: [Deficit $X.XT | Outlays YoY +X% | Interest/Receipts X%]
+mts = fred_series("MTSDS133FMS", 12)     # monthly surplus/deficit ($M)
+outl = fred_series("MTSO133FMS", 24)     # monthly total outlays ($M)
+rcpt = fred_series("MTSR133FMS", 12)     # monthly total receipts ($M)
+intr = fred_series("A091RC1Q027SBEA", 1) # fed interest payments ($bn, SAAR)
 fisc_sub, fisc_col = "no data", "gray"
+deficit_T = outlays_yoy = int_ratio = None
 if mts and len(mts) >= 12:
-    deficit = -sum(mts[:12]) / 1e6  # millions -> $T, deficit positive
-    dval, _ = keep("deficit_T", deficit, -1, 10)
-    if dval is not None:
-        fisc_col = "red" if dval > 2.0 else ("amber" if dval > 1.5 else "green")
-        fisc_sub = "12M deficit $%.2fT" % dval
+    deficit_T, _ = keep("deficit_T", -sum(mts[:12]) / 1e6, -1, 10)
 else:
-    c = CACHE.get("deficit_T")
-    if c is not None:
-        fisc_sub, fisc_col = "12M deficit $%.2fT (last known)" % c, "amber"
-
-
+    deficit_T = CACHE.get("deficit_T")
+if outl and len(outl) >= 24:
+    _cur12, _prv12 = sum(outl[:12]), sum(outl[12:24])
+    if _prv12:
+        outlays_yoy, _ = keep("outlays_yoy", (_cur12 / _prv12 - 1) * 100, -50, 50)
+else:
+    outlays_yoy = CACHE.get("outlays_yoy")
+if rcpt and len(rcpt) >= 12 and intr:
+    _rc_T = sum(rcpt[:12]) / 1e6           # $T
+    _int_T = intr[0] / 1000.0              # $bn SAAR -> $T
+    if _rc_T > 0:
+        int_ratio, _ = keep("int_ratio", _int_T / _rc_T * 100, 0, 60)
+else:
+    int_ratio = CACHE.get("int_ratio")
+if deficit_T is not None:
+    _red = deficit_T > 2.0 and (outlays_yoy is not None and outlays_yoy > 8)
+    _amber = ((1.5 <= deficit_T <= 2.0)
+              or (outlays_yoy is not None and 5 <= outlays_yoy <= 8)
+              # deficit >2T but outlays unknown/below 8% cannot be full red
+              or (deficit_T > 2.0 and not _red))
+    fisc_col = "red" if _red else ("amber" if _amber else "green")
+    _warn = " ⚠ interest/receipts >13%" if (int_ratio is not None and int_ratio > 13) else ""
+    fisc_sub = "[Deficit $%.2fT | Outlays YoY %s | Interest/Receipts %s]%s" % (
+        deficit_T,
+        ("%+.1f%%" % outlays_yoy) if outlays_yoy is not None else "n/a",
+        ("%.1f%%" % int_ratio) if int_ratio is not None else "n/a",
+        _warn)
 def third_friday(y, m):
     fr = [d for d in _cal.Calendar().itermonthdates(y, m) if d.month == m and d.weekday() == 4]
     return fr[2]
-
-
-_t = datetime.date.today()
-opex_days = abs((third_friday(_t.year, _t.month) - _t).days)
+def next_third_friday(d):
+    """Next monthly OpEx ON OR AFTER d (rolls to next month once passed).
+    FIXED 2026-07-03: the old abs() version measured distance to THIS month's
+    3rd Friday in either direction, so post-OpEx it reported days SINCE OpEx
+    and never saw the next one."""
+    tf = third_friday(d.year, d.month)
+    if tf < d:
+        y, m = (d.year + 1, 1) if d.month == 12 else (d.year, d.month + 1)
+        tf = third_friday(y, m)
+    return tf
+_t = ET_TODAY
+_next_opex = next_third_friday(_t)
+opex_days = (_next_opex - _t).days
 fomc_days = None
 ec, _ = fmp("economic-calendar?from=%s&to=%s" % (_t, _t + datetime.timedelta(days=10)))
 if ec and isinstance(ec, list):
@@ -1060,16 +947,14 @@ if ec and isinstance(ec, list):
 cal_flags = []
 if fomc_days is not None and fomc_days <= 5:
     cal_flags.append("FOMC in %dd" % fomc_days)
-if opex_days <= 3:
-    cal_flags.append("OpEx in %dd" % opex_days)
+# OpEx Structural Transition Window: 10 days before monthly OpEx per the
+# MacroSage calendar rule (short-gamma dominant window).
+if opex_days <= 10:
+    cal_flags.append("CALENDAR GATE — TRANSITION WINDOW (OpEx in %dd)" % opex_days)
 cal_sub = "; ".join(cal_flags) if cal_flags else "clear"
 cal_col = "red" if cal_flags else "green"
-
-# ---- COT positioning (CFTC public data + Tradingster fallback) ----
 cot_sub, cot_col = "no data", "gray"
 _cot = cot_emini()
-
-# Staleness check: CFTC data older than 10 days is treated as STALE/UNAVAILABLE
 _cot_stale = False
 if _cot and "report_date_as_yyyy_mm_dd" in _cot:
     try:
@@ -1086,12 +971,9 @@ if _cot and "report_date_as_yyyy_mm_dd" in _cot:
                 _cot = None
     except Exception as _e:
         log.warning("COT date parse error: %s", _e)
-
 if not _cot and not _cot_stale:
-    # Primary fetch returned nothing - try Tradingster immediately
     log.info("COT CFTC returned no data; trying Tradingster fallback")
     _cot = fetch_cot_tradingster()
-
 if _cot:
     try:
         amL = float(_cot["asset_mgr_positions_long"])
@@ -1122,8 +1004,6 @@ else:
     cc = CACHE.get("cot_col")
     if c:
         cot_sub, cot_col = c + " (last known, COT STALE/UNAVAILABLE)", "amber"
-
-# ---- VVIX divergence (Yahoo Finance) ----
 vvix_sub, vvix_col = "no data", "gray"
 _vv = yahoo_closes("%5EVVIX")
 _vx = yahoo_closes("%5EVIX")
@@ -1141,9 +1021,6 @@ if vvix_sub == "no data":
     c = CACHE.get("vvix_sub")
     if c:
         vvix_sub, vvix_col = c + " (last known)", "amber"
-
-
-# ---- McClellan Oscillator / NYMO (mcoscillator.com) ----
 nymo_sub, nymo_col = "manual — https://www.mcoscillator.com/market_breadth_data/ (next: daily)", "gray"
 _nymo_result = compute_nymo(CACHE)
 if _nymo_result and _nymo_result.get("nymo") is not None:
@@ -1161,9 +1038,6 @@ else:
         nymo_sub = "NYMO %.1f (last known)" % _nymo_cached
         nymo_col = "green" if _nymo_cached >= 0 else "red"
         log.warning("NYMO: A/D unavailable, using cache (%.2f)", _nymo_cached)
-    # else stays as manual fallback label above
-
-# ---- NAAIM Exposure Index (naaim.org) ----
 naaim_sub, naaim_col = "manual — https://www.naaim.org/programs/naaim-exposure-index/ (weekly)", "gray"
 _naaim_live = fetch_naaim()
 if _naaim_live and _naaim_live.get("naaim") is not None:
@@ -1177,8 +1051,6 @@ else:
         naaim_sub = "NAAIM %.1f (last known)" % _naaim_cached
         naaim_col = "red" if _naaim_cached > 90 else "amber"
         log.warning("NAAIM: using cache (%.1f)", _naaim_cached)
-
-# ---- AAII Sentiment (aaii.com) ----
 aaii_sub, aaii_col = "manual — https://www.aaii.com/sentimentsurvey (weekly)", "gray"
 _aaii_live = fetch_aaii()
 if _aaii_live and _aaii_live.get("bull") is not None:
@@ -1195,15 +1067,8 @@ else:
         aaii_sub = "AAII bull %.0f%% bear %.0f%% (last known)" % (_bcached, _brcached or 0)
         aaii_col = "red" if _bcached > 55 else "amber"
         log.warning("AAII: using cache")
-
-# ---- VIX Term Structure (VIX / VIX3M) regime ----
-# Replaces tile #17 (was GEX / gamma flip — permanently manual because
-# SpotGamma paywalls + JS-renders it). Front-month ^VIX is the same series
-# used by tile #2; both legs come from the keyless wider Yahoo fetcher
-# (FMP Starter tier gates index quotes). See compute_vix_term_structure().
 _vts = compute_vix_term_structure(CACHE)
 vix_ts_sub, vix_ts_col = "unavailable", "gray"
-# _vix_backwardation feeds the Layer-2 2-of-3 ENTRY SIGNAL check below.
 _vix_backwardation = False
 if _vts is not None:
     _ratio = _vts["ratio"]
@@ -1219,7 +1084,6 @@ if _vts is not None:
     vix_ts_sub = "VIX %.2f / VIX3M %.2f = %.3f — %s%s%s" % (
         _vts["vix"], _vts["vix3m"], _ratio, _depth, _streak_txt,
         " (last known)" if _vts_stale else "")
-    # BACKWARDATION = stress/vol-amplifying -> bearish/red; CONTANGO = calm -> green.
     if _vts_stale:
         vix_ts_col = "amber"
     else:
@@ -1230,21 +1094,55 @@ else:
         vix_ts_sub = "VIX/VIX3M ratio %.3f (last known)" % _cached_ratio
         vix_ts_col = "amber"
         log.warning("VIX term structure: using cache (%.3f)", _cached_ratio)
-
-# GEX-flip Layer-2 input: the SpotGamma source stays unavailable (paywalled,
-# JS-rendered). We do NOT silently drop it from the 2-of-3 count — it is kept
-# as an explicit, currently-unavailable manual input (always False here) so the
-# ENTRY-SIGNAL math is intentional and can be re-enabled if a live GEX feed is
-# wired back in (an explicit, currently-unavailable manual input).
-gamma_flip = False  # GEX flip: manual/unavailable input (SpotGamma paywalled)
-
-# ---- SPX 200-day MA gate ----
-# FIXED 2026-06-30 (fix-200dma): previously called yahoo_closes("SPY", 205),
-# but yahoo_closes() is hard-capped at range=10d so it never returned 200
-# sessions and this gate was permanently dormant. Now uses the wider Yahoo
-# fetcher (range=1y ~= 251 sessions) so the 200-day SMA can actually be built.
-_spy_hist = _yahoo_closes_range("SPY", "1y")
-spx_above_200dma = None  # None = unknown
+# GEX flip: still no free live source (SpotGamma paywalled). Now a MANUAL
+# input instead of a hardcoded False: set env GEX_FLIP=1 (or state.json key
+# "gex_flip_manual") when dealer gamma has flipped negative. Fail-safe: off.
+gamma_flip = (cfg("GEX_FLIP") == "1") or bool(CACHE.get("gex_flip_manual"))
+if gamma_flip:
+    log.info("GEX flip: MANUAL input active (env/state) — counted in Layer-2")
+# ---- SPY daily history WITH VOLUME (Yahoo primary, Stooq fallback) ----
+# Volume feeds the new breakdown-volume gate; Stooq removes the single point
+# of failure where one Yahoo block froze every trend gate at 'last known'.
+def _stooq_daily(symbol):
+    """Stooq daily CSV -> (closes, volumes) oldest-first, or None."""
+    url = "https://stooq.com/q/d/l/?s=%s&i=d" % symbol
+    text, err = _http_get_text(url, timeout=20)
+    if not text or not text.strip().lower().startswith("date"):
+        log.warning("Stooq %s: bad/empty response (%s)", symbol, err)
+        return None
+    closes, vols = [], []
+    for row in text.strip().splitlines()[1:]:
+        parts = row.split(",")
+        if len(parts) >= 6:
+            try:
+                closes.append(float(parts[4]))
+                vols.append(float(parts[5]) if parts[5] else 0.0)
+            except (ValueError, IndexError):
+                pass
+    return (closes, vols) if closes else None
+def fetch_spy_history():
+    """(closes, volumes, source) for ~1y of SPY daily data, oldest-first."""
+    url = ("https://query1.finance.yahoo.com/v8/finance/chart/SPY"
+           "?range=1y&interval=1d")
+    d, _ = http_get_json(url, headers=UA_HDR)
+    try:
+        q = d["chart"]["result"][0]["indicators"]["quote"][0]
+        closes = [float(c) for c in q["close"] if c is not None]
+        vols = [float(v) for v in (q.get("volume") or []) if v is not None]
+        if len(closes) >= 60:
+            log.info("SPY history: Yahoo, %d sessions", len(closes))
+            return closes, vols, "yahoo"
+    except Exception:
+        pass
+    log.warning("SPY history: Yahoo failed; trying Stooq")
+    s = _stooq_daily("spy.us")
+    if s and len(s[0]) >= 60:
+        log.info("SPY history: Stooq, %d sessions", len(s[0]))
+        return s[0][-260:], s[1][-260:], "stooq"
+    log.warning("SPY history: ALL sources failed")
+    return None, None, None
+_spy_hist, _spy_vols, _spy_src = fetch_spy_history()
+spx_above_200dma = None
 spx_200dma = None
 if _spy_hist and len(_spy_hist) >= 200:
     spx_200dma = sum(_spy_hist[-200:]) / 200.0
@@ -1258,68 +1156,122 @@ if _spy_hist and len(_spy_hist) >= 200:
 else:
     log.warning("SPX 200DMA gate: insufficient SPY history (%s sessions); gate inactive",
                 len(_spy_hist) if _spy_hist else 0)
-
-# ---- 50DMA (companion to the 200DMA gate; reuses the same SPY history) ----
 spx_50dma = None
 if _spy_hist and len(_spy_hist) >= 50:
     spx_50dma = sum(_spy_hist[-50:]) / 50.0
 else:
     log.warning("SPX 50DMA: insufficient SPY history (%d sessions)",
                 len(_spy_hist) if _spy_hist else 0)
-
-
-# ---- BREADTH PROXY (RSP/SPY equal-weight vs cap-weight) ----
-# Free, no-paid-tier breadth-direction proxy. Directional/relative only.
+# ---- VOLUME GATE (2026-07-03): breakdown volume >= 1.2x the 20-day average.
+# Sub-average volume = WAIT (blocks INITIATE). Intraday guard: before the
+# 16:00 ET close the last bar is partial, so it is dropped and the prior
+# completed session is used instead.
+vol_ratio = None
+if _spy_vols and len(_spy_vols) >= 25:
+    _vols = [v for v in _spy_vols if v]
+    _et_now = eastern_now()
+    if (_et_now.hour < 16) and not (IS_WEEKEND or IS_HOLIDAY) and len(_vols) > 21:
+        _vols = _vols[:-1]
+        log.info("volume gate: pre-close run — dropped partial intraday bar")
+    if len(_vols) >= 21:
+        _v_last = _vols[-1]
+        _v_avg20 = sum(_vols[-21:-1]) / 20.0
+        if _v_avg20 > 0:
+            vol_ratio = _v_last / _v_avg20
+            log.info("volume gate: last %.0f vs 20d avg %.0f -> %.2fx (need >=1.20)",
+                     _v_last, _v_avg20, vol_ratio)
+else:
+    log.warning("volume gate: SPY volume unavailable — gate FAIL-CLOSED (blocks INITIATE)")
+# ---- R:R GATE (2026-07-03): reward:risk must be >= 5.0, else WATCHING.
+#   entry  = current SPY price
+#   stop   = highest close of the last 5 sessions (floor: entry +0.5%)
+#            -> override with env/state RR_STOP (SPY points)
+#   target = measured-move projection: entry - (52wk high - entry), i.e. the
+#            existing drawdown doubled. Deliberately mechanical; override with
+#            env/state RR_TARGET when you have a level-based target.
+# Fail-closed: missing inputs -> rr_value None -> INITIATE blocked.
+rr_value = rr_stop = rr_target = None
+try:
+    _stop_ovr = num(cfg("RR_STOP")) or num(CACHE.get("rr_stop_manual"))
+    _tgt_ovr = num(cfg("RR_TARGET")) or num(CACHE.get("rr_target_manual"))
+    if spy_px is not None and _spy_hist and len(_spy_hist) >= 30:
+        _hi52 = max(_spy_hist[-252:]) if len(_spy_hist) >= 252 else max(_spy_hist)
+        _swing_hi = max(_spy_hist[-5:])
+        rr_stop = _stop_ovr if _stop_ovr else max(_swing_hi, spy_px * 1.005)
+        rr_target = _tgt_ovr if _tgt_ovr else (spy_px - (_hi52 - spy_px))
+        _risk = rr_stop - spy_px
+        _reward = spy_px - rr_target
+        if _risk > 0 and _reward > 0:
+            rr_value = _reward / _risk
+            log.info("R:R gate: entry %.2f stop %.2f target %.2f -> %.1f (need >=5.0)%s%s",
+                     spy_px, rr_stop, rr_target, rr_value,
+                     " [stop override]" if _stop_ovr else "",
+                     " [target override]" if _tgt_ovr else "")
+        else:
+            log.warning("R:R gate: non-positive risk/reward (stop %.2f target %.2f entry %.2f)",
+                        rr_stop, rr_target, spy_px)
+    else:
+        log.warning("R:R gate: inputs unavailable — gate FAIL-CLOSED (blocks INITIATE)")
+except Exception as _ex:
+    log.warning("R:R gate error: %s — gate FAIL-CLOSED", _ex)
 _bp = compute_breadth_proxy(CACHE)
-# Recent-high context for the SPX-vs-breadth divergence test. Reuses the wide
-# SPY history (range=1y) now fetched by the repaired 200DMA gate above; the
-# 52-week (~252-session) high-water window is computed below.
 _spx_near_high = None
 try:
-    # Reuse the wide SPY history fetched for the 200DMA gate (range=1y ~= 251
-    # sessions); fall back to a fresh 1y pull if the gate fetch returned nothing.
     _spy_wide = _spy_hist if _spy_hist else _yahoo_closes_range("SPY", "1y")
     if _spy_wide and len(_spy_wide) >= 20 and spy_px is not None:
-        # 52-week high-water window (~252 sessions); widened from 60 on fix-200dma.
         _recent_high = max(_spy_wide[-252:]) if len(_spy_wide) >= 252 else max(_spy_wide)
-        # "at/near recent highs" = within 2% of the 52-week high
         _spx_near_high = spy_px >= _recent_high * 0.98
 except Exception as _ex:
     log.warning("breadth proxy: SPX recent-high context failed: %s", _ex)
-
-# McClellan divergence: NYMO negative WHILE SPX near its 52-week high.
-# _spx_near_high is computed just above (defaults to None if the fetch failed),
-# mirroring the breadth-divergence gate so this Layer-2 signal only fires on a
-# genuine price/breadth divergence rather than on any negative NYMO reading.
 mcclellan_divergence = (nymo_col == "red") and bool(_spx_near_high)
-
-
-# ===========================================================================
-# VERDICT AUGMENTATION (live-indicators)
-# Runs after all data sources gathered so cal_sub, vvix_sub, GEX etc are set.
-# ===========================================================================
-
-# ---- 200DMA GATE ----
 if spx_above_200dma is True:
     _200dma_note = " | 200DMA GATE: SPX above 200MA (~%.0f) — cap short conviction YELLOW" % (spx_200dma or 0)
     primary = primary + _200dma_note
+    initiate_short = False
 elif spx_above_200dma is False:
     primary = primary + " | 200DMA: SPX BELOW 200MA — structural short regime valid"
-
-# ---- BREADTH DECAY STREAK ----
-_prev_bd = CACHE.get("breadth_decay_streak") or 0
+spx_above_10mema = None
+spx_10mema = None
+_spy_monthly = _yahoo_monthly_closes("SPY", "3y")
+if _spy_monthly and len(_spy_monthly) >= 10:
+    spx_10mema = _ema(_spy_monthly, 10)
+    if spx_10mema is not None and spy_px is not None:
+        spx_above_10mema = (spy_px >= spx_10mema)
+        log.info("MONTHLY TREND GATE: SPY %.2f vs 10M EMA %.2f -> above=%s (%d monthly closes)",
+                 spy_px, spx_10mema, spx_above_10mema, len(_spy_monthly))
+    else:
+        log.warning("MONTHLY TREND GATE: 10M EMA=%s but SPY price unavailable; gate UNKNOWN",
+                    ("%.2f" % spx_10mema) if spx_10mema is not None else "None")
+else:
+    log.warning("MONTHLY TREND GATE: insufficient monthly SPY closes (%s); gate UNKNOWN",
+                len(_spy_monthly) if _spy_monthly else 0)
+if spx_above_10mema is not False:
+    if initiate_short:
+        log.info("MONTHLY TREND GATE: blocking INITIATE SHORT (gate not open)")
+    initiate_short = False
+    _pv_up = primary.upper()
+    if "INITIATE" in _pv_up or "SHORT NOW" in _pv_up:
+        primary = primary.replace("INITIATE SHORT", "WATCHING").replace("INITIATE", "WATCHING").replace("SHORT NOW", "WATCHING")
+if spx_above_10mema is True:
+    primary = primary + (" | MONTHLY TREND GATE: SPX above 10M EMA (~%.0f) — INITIATE SHORT blocked" % spx_10mema)
+elif spx_above_10mema is False:
+    primary = primary + " | MONTHLY TREND GATE: SPX below 10M EMA — gate open for INITIATE SHORT"
+else:
+    primary = primary + " | MONTHLY TREND GATE: 10M EMA unavailable — gate UNKNOWN, INITIATE SHORT blocked"
+_prev_bd = int(CACHE.get("breadth_decay_streak") or 0)
+# SESSION GUARD: decay streak counts trading sessions, not runs.
 if breadth_red:
-    breadth_decay_streak = int(_prev_bd) + 1
+    if is_new_session(CACHE, "bd_session"):
+        breadth_decay_streak = _prev_bd + 1
+        mark_session(CACHE, "bd_session")
+    else:
+        breadth_decay_streak = max(_prev_bd, 1)
 else:
     breadth_decay_streak = 0
 CACHE.set("breadth_decay_streak", breadth_decay_streak, RUN_TS)
 if breadth_decay_streak > 0:
     primary = primary + " | Breadth decay streak: %d session%s" % (
         breadth_decay_streak, "s" if breadth_decay_streak != 1 else "")
-
-
-# ---- BREADTH PROXY DIRECTION (RSP/SPY) + DIVERGENCE ----
-# Additive to the existing NYMO / sector-breadth tiles (not a replacement).
 breadth_proxy_divergence = False
 if _bp is not None:
     _bp_dir = _bp["direction"]
@@ -1328,51 +1280,19 @@ if _bp is not None:
     _bp_tag = " (last known)" if _bp_stale else ""
     primary = primary + " | breadth proxy (RSP/SPY) %s: %d session%s%s" % (
         _bp_dir, _bp_streak, "s" if _bp_streak != 1 else "", _bp_tag)
-    # Divergence: SPX at/near recent highs while RSP/SPY ratio is falling.
     if _spx_near_high and _bp_dir == "NARROWING" and not _bp_stale:
         breadth_proxy_divergence = True
         primary = primary + " | BREADTH DIVERGENCE (RSP/SPY) CONFIRMED"
         log.info("BREADTH DIVERGENCE (RSP/SPY) CONFIRMED: SPX near highs, ratio narrowing")
-# ---- LAYER-2 SIGNAL CHECK (GEX flip, VIX backwardation, McClellan divergence) ----
-# _vix_backwardation is now set from the real VIX/VIX3M term-structure tile
-# (compute_vix_term_structure) above — no longer inferred from VVIX text.
-# The three ENTRY-SIGNAL inputs remain a 2-of-3 set:
-#   1) gamma_flip           — GEX flip (manual/unavailable: SpotGamma paywalled)
-#   2) _vix_backwardation   — VIX term structure in backwardation (LIVE via Yahoo)
-#   3) mcclellan_divergence — NYMO negative while SPX near highs
-# GEX-flip is retained (not dropped) as an explicit unavailable input so the
-# 2-of-3 threshold is unchanged and the math stays intentional.
-_l2_signals = sum([gamma_flip, _vix_backwardation, mcclellan_divergence])
-
-# Clear calendar = no FOMC/OpEx within 2 days
-_cal_clear = (cal_sub not in ("no data",) and
-              not any(x in cal_sub for x in ("in 0d", "in 1d", "in 2d")))
-
-if _l2_signals >= 2 and _cal_clear:
-    _l2_names = []
-    if gamma_flip: _l2_names.append("GEX flip")
-    if _vix_backwardation: _l2_names.append("VIX backwardation")
-    if mcclellan_divergence: _l2_names.append("McClellan divergence")
-    _why_low = []
-    if "WATCHING" in primary: _why_low.append("PRIMARY still WATCHING")
-    if spx_above_200dma: _why_low.append("SPX above 200DMA")
-    _conv_note = "probe size" if (_why_low) else "standard"
-    layer2 = ("ENTRY SIGNAL - early/low-conviction (%s) [%s%s]" % (
-        _conv_note,
-        ", ".join(_l2_names),
-        ("; caveat: " + "; ".join(_why_low)) if _why_low else "",
-    ))
-    log.info("Layer2 ENTRY signal fired: %s", layer2)
-
-
-# ===========================================================================
-# BUILD 18 TILES
-# ===========================================================================
+# NOTE 2026-07-03: the Layer-2 2-of-3 ENTRY-SIGNAL check moved into the
+# VERDICT ENGINE below (after the tiles are built) so its caveats reference
+# the FINAL primary verdict, not the pre-escalation placeholder.
 p = []
+_vol_txt = (" | vol %.2fx 20d" % vol_ratio) if vol_ratio is not None else ""
 p.append(("1. Equities (S&P via SPY)",
-          ("SPY %.2f (%+.2f%%)" % (spy_px, spy_chg))
-          if (spy_px is not None and spy_chg is not None)
-          else (("SPY %.2f" % spy_px) if spy_px is not None else "unavailable"),
+          (("SPY %.2f (%+.2f%%)%s" % (spy_px, spy_chg, _vol_txt))
+           if (spy_px is not None and spy_chg is not None)
+           else (("SPY %.2f%s" % (spy_px, _vol_txt)) if spy_px is not None else "unavailable")),
           "amber" if spy_px is not None else "gray"))
 p.append(("2. Volatility (VIX)",
           ("%.1f" % vix_px) if vix_px is not None else "unavailable",
@@ -1403,8 +1323,6 @@ p.append(("14. McClellan / NYMO", nymo_sub, nymo_col))
 p.append(("15. NAAIM Exposure", naaim_sub, naaim_col))
 p.append(("16. AAII Sentiment", aaii_sub, aaii_col))
 p.append(("17. VIX Term Structure (VIX/VIX3M)", vix_ts_sub, vix_ts_col))
-
-# ---- Tile 18: breadth proxy (RSP/SPY) — directional/relative, NOT a precise % ----
 if _bp is not None:
     _bp_ma = "above" if (_bp.get("sma50") is not None and _bp["ratio"] >= _bp["sma50"]) else "below"
     _bp_stale2 = _bp.get("stale", False)
@@ -1423,19 +1341,120 @@ if _bp is not None:
 else:
     bp_sub, bp_col = "unavailable", "gray"
 p.append(("18. Breadth proxy (RSP/SPY)", bp_sub, bp_col))
-
-
-# count tiles that actually have data (not "unavailable"/"no data")
 DEAD = {"unavailable", "no data", "parse error"}
 TILES_WITH_DATA = sum(1 for _, sub, _c in p if str(sub).strip().lower() not in DEAD)
 log.info("tiles populated: %d/%d", TILES_WITH_DATA, TOTAL_TILES)
-
 # ===========================================================================
-# BUILD HTML
+# VERDICT ENGINE (added 2026-07-03)
+# The old build could NEVER escalate: initiate_short started False and no
+# code path set it True; "Day 1 of 3" was hardcoded. This engine:
+#   1. persists the dual-red (breadth + net-liquidity) streak per SESSION
+#   2. fires INITIATE SHORT only when EVERY rule is satisfied (fail-closed:
+#      unknown data blocks; it can never fire on missing inputs)
+#   3. lists every blocker explicitly so the email shows exactly what's missing
+#   4. applies the MacroSage sizing ladder + manual catalyst/post-loss flags
 # ===========================================================================
-now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-today = datetime.date.today().strftime("%B %d, %Y")
-
+n_red = sum(1 for _, _, c in p if c == "red")
+n_amber = sum(1 for _, _, c in p if c == "amber")
+tile11_red = p[10][2] == "red"   # Sector rotation (Pt11)
+tile16_red = p[15][2] == "red"   # AAII Sentiment  (Pt16)
+# ---- 1. dual-red streak (session-guarded, persisted) ----
+dual_red = bool(breadth_red and netliq_decl)
+_prev_streak = int(CACHE.get("dual_red_streak") or 0)
+if dual_red:
+    if is_new_session(CACHE, "verdict_session"):
+        dual_red_streak = _prev_streak + 1
+        mark_session(CACHE, "verdict_session")
+    else:
+        dual_red_streak = max(_prev_streak, 1)
+else:
+    dual_red_streak = 0
+CACHE.set("dual_red_streak", dual_red_streak, RUN_TS)
+log.info("dual-red streak: %d session(s) (breadth_red=%s, netliq_decl=%s)",
+         dual_red_streak, breadth_red, netliq_decl)
+# ---- 2. gate evaluation (every gate must be POSITIVELY confirmed) ----
+_g_streak = dual_red_streak >= 3
+_g_200 = spx_above_200dma is False          # SPX confirmed BELOW 200DMA
+_g_10m = spx_above_10mema is False          # SPX confirmed BELOW 10M EMA
+_g_vol = vol_ratio is not None and vol_ratio >= 1.2
+_g_rr = rr_value is not None and rr_value >= 5.0
+_g_fomc = not (fomc_days is not None and fomc_days <= 2)  # event-risk block
+blockers = []
+if not _g_streak:
+    blockers.append("dual-red streak %d/3" % dual_red_streak)
+if not _g_200:
+    blockers.append("SPX above 200DMA" if spx_above_200dma else "200DMA gate unknown")
+if not _g_10m:
+    blockers.append("SPX above 10M EMA" if spx_above_10mema else "10M-EMA gate unknown")
+if not _g_vol:
+    blockers.append(("volume %.2fx < 1.2x" % vol_ratio) if vol_ratio is not None
+                    else "volume unknown")
+if not _g_rr:
+    blockers.append(("R:R %.1f < 5.0" % rr_value) if rr_value is not None
+                    else "R:R unknown")
+if not _g_fomc:
+    blockers.append("FOMC within 2 days")
+initiate_short = not blockers
+# ---- 3. sizing ladder ----
+if n_red >= 16:
+    size_mult, size_txt = 2.0, "2.0x (16-19 red)"
+elif n_red >= 12:
+    size_mult, size_txt = 1.5, "1.5x (12-15 red)"
+elif n_red >= 8:
+    size_mult, size_txt = 1.0, "standard (8-11 red)"
+else:
+    size_mult, size_txt = 0.5, "probe only (<8 red)"
+catalyst_on = (cfg("CATALYST_ON") == "1") or bool(CACHE.get("catalyst_on"))
+post_loss = (cfg("POST_LOSS_DESIZE") == "1") or bool(CACHE.get("post_loss_desize"))
+size_notes = []
+if not catalyst_on:
+    size_mult *= 0.5
+    size_notes.append("halved: no active catalyst confirmed (set CATALYST_ON=1)")
+if post_loss:
+    size_mult *= 0.5
+    size_notes.append("halved: post-loss de-sizing active (clears after a profitable exit)")
+max_conviction = initiate_short and tile11_red and tile16_red
+# ---- 4. rebuild the PRIMARY verdict head, keeping the appended gate notes ----
+_split = primary.split(" | ", 1)
+_notes_tail = (" | " + _split[1]) if len(_split) > 1 else ""
+if initiate_short:
+    head = ("INITIATE SHORT — dual-red streak %d/3 confirmed; SPX below 200DMA & 10M EMA; "
+            "volume %.2fx (>=1.2x); R:R %.1f (stop %.2f / target %.2f); FOMC clear. "
+            "Size: %.2fx [%s]%s%s. Exit rule: 2%% adverse within 3 sessions = full exit, "
+            "no averaging down." % (
+                dual_red_streak, vol_ratio, rr_value, rr_stop, rr_target,
+                size_mult, size_txt,
+                ("; " + "; ".join(size_notes)) if size_notes else "",
+                " | MAX CONVICTION (Pt11+Pt16 dual red)" if max_conviction else ""))
+    log.info("*** INITIATE SHORT FIRED *** size %.2fx", size_mult)
+else:
+    if dual_red:
+        head = "WATCHING - Day %d of 3 (dual-red active)" % min(dual_red_streak, 3)
+    else:
+        head = "WATCHING - dual-red not active (breadth %s, net liquidity %s)" % (
+            "RED" if breadth_red else ("UNKNOWN" if breadth is None else "ok"),
+            "declining" if netliq_decl else ("UNKNOWN" if netliq_dir is None else "ok"))
+    head += " | INITIATE blocked by: " + "; ".join(blockers)
+primary = head + _notes_tail
+# ---- 5. Layer-2 2-of-3 ENTRY SIGNAL (moved here so caveats see the final verdict) ----
+_l2_signals = sum([gamma_flip, _vix_backwardation, mcclellan_divergence])
+_cal_clear = not any(x in cal_sub for x in ("in 0d", "in 1d", "in 2d"))
+if _l2_signals >= 2 and _cal_clear:
+    _l2_names = []
+    if gamma_flip: _l2_names.append("GEX flip (manual)")
+    if _vix_backwardation: _l2_names.append("VIX backwardation")
+    if mcclellan_divergence: _l2_names.append("McClellan divergence")
+    _why_low = []
+    if not initiate_short: _why_low.append("PRIMARY still WATCHING")
+    if spx_above_200dma: _why_low.append("SPX above 200DMA")
+    _conv_note = "probe size" if _why_low else "standard"
+    layer2 = ("ENTRY SIGNAL - early/low-conviction (%s) [%s%s]" % (
+        _conv_note,
+        ", ".join(_l2_names),
+        ("; caveat: " + "; ".join(_why_low)) if _why_low else ""))
+    log.info("Layer2 ENTRY signal fired: %s", layer2)
+now = eastern_now().strftime("%Y-%m-%d %H:%M ET")
+today = ET_TODAY.strftime("%B %d, %Y")
 stale_banner = ""
 if IS_HOLIDAY:
     stale_banner = ("<div style=\"background:#faeeda;border-left:4px solid #ef9f27;"
@@ -1445,10 +1464,7 @@ elif IS_WEEKEND:
     stale_banner = ("<div style=\"background:#f1efe8;border-left:4px solid #888780;"
                     "padding:8px 12px;margin-bottom:12px;font-size:12px;color:#444441;\">"
                     "US market closed (weekend) - figures reflect the prior session.</div>")
-
-
 def build_html():
-    # Gmail-safe light theme: white cards never mutated by dark mode
     PAGE    = "#f0f2f5"
     CARD    = "#ffffff"
     CARD2   = "#f8f9fa"
@@ -1461,38 +1477,31 @@ def build_html():
     RED     = "#cf222e"
     GRAY    = "#6e7781"
     FONT    = "-apple-system,BlinkMacSystemFont,'Helvetica Neue',Arial,sans-serif"
-
     sig_color = {"green": GREEN, "amber": AMBER, "red": RED, "gray": GRAY}
     sig_label = {"green": "Bullish", "amber": "Watch", "red": "Bearish", "gray": "Neutral"}
-
     def esc(s):
         return str(s).replace("&","&amp;").replace("<","&lt;").replace(">","&gt;")
-
     pv = (primary or "").upper()
-    if "INITIATE" in pv or "SHORT NOW" in pv:
+    if initiate_short:
         b_txt, b_bg, b_fg, b_bdr = "INITIATE SHORT", "#ffebe9", RED, RED
     elif "WATCH" in pv:
         b_txt, b_bg, b_fg, b_bdr = "WATCHING", "#fff8c5", AMBER, AMBER
     else:
         b_txt, b_bg, b_fg, b_bdr = "STAND DOWN", "#dafbe1", GREEN, GREEN
-
     spx_str = fmt_money(spx_proxy) if spx_proxy else "n/a"
     day_chg = ("%+.2f%%" % spy_chg) if spy_chg is not None else ""
     day_col = GREEN if (spy_chg or 0) >= 0 else RED
     vs200   = (("%+.1f%% vs 200d" % ((spx_proxy/(spx_200dma*10)-1)*100)) if spx_proxy and spx_200dma else "")
     vs50    = (("%+.1f%% vs 50d"  % ((spx_proxy/(spx_50dma*10)-1)*100))  if spx_proxy and spx_50dma  else "")
-
     if spx_above_200dma is True:
         gate_note = ("SPX above 200MA (~%.0f) - short conviction caution." % (spx_200dma*10)) if spx_200dma else "SPX above 200MA - short conviction caution."
     elif spx_above_200dma is False:
         gate_note = "SPX below 200MA - gate open."
     else:
         gate_note = "200DMA gate status unavailable."
-
     n_red   = sum(1 for _,_,c in p if c == "red")
     n_amber = sum(1 for _,_,c in p if c == "amber")
     n_green = sum(1 for _,_,c in p if c == "green")
-
     def metric_card(title, sub, ckey):
         import re as _re
         col     = sig_color.get(ckey, GRAY)
@@ -1510,7 +1519,6 @@ def build_html():
             'margin-top:3px;line-height:1.3;">%s</div>'
             '</td></tr></table></td>'
         ) % (CARD, CARD, BORDER, col, FONT, col, title_c, FONT, SUB, sub_s)
-
     grid_rows = ""
     for i in range(0, len(p), 2):
         lt, ls, lc = p[i]
@@ -1520,7 +1528,6 @@ def build_html():
         else:
             rc_cell = '<td width="50%%" style="padding:3px;"></td>'
         grid_rows += '<tr>%s%s</tr>' % (metric_card(lt, ls, lc), rc_cell)
-
     out  = '<!DOCTYPE html>'
     out += ('<html><head><meta charset="UTF-8">'
             '<meta name="color-scheme" content="light">'
@@ -1529,12 +1536,9 @@ def build_html():
             '<table width="100%%" cellpadding="0" cellspacing="0" border="0"'
             ' bgcolor="%s" style="background:%s;">'
             '<tr><td align="center" style="padding:20px 8px;">') % (PAGE, PAGE, PAGE)
-
     out += ('<table width="480" cellpadding="0" cellspacing="0" border="0"'
             ' bgcolor="%s" style="max-width:480px;width:100%%;background:%s;'
             'border:1px solid %s;border-radius:10px;">') % (CARD2, CARD2, BORDER)
-
-    # HEADER
     out += ('<tr><td bgcolor="%s" style="background:%s;padding:13px 16px;'
             'border-radius:10px 10px 0 0;border-bottom:1px solid %s;">'
             '<table width="100%%" cellpadding="0" cellspacing="0" border="0"><tr>'
@@ -1542,12 +1546,8 @@ def build_html():
             'MacroSage <span style="color:%s;">SHORT</span></td>'
             '<td align="right" style="font-family:%s;font-size:10px;color:%s;">%s</td>'
             '</tr></table></td></tr>') % (CARD, CARD, BORDER, FONT, TEXT, RED, FONT, MUTED, esc(today))
-
-    # HOLIDAY / STALE-DATA BANNER (renders only when stale_banner is non-empty)
     if stale_banner:
         out += f'<tr><td style="padding:0 16px 12px 16px;">{stale_banner}</td></tr>'
-
-    # SPX + VERDICT PILL
     out += ('<tr><td bgcolor="%s" style="background:%s;padding:11px 16px;'
             'border-bottom:1px solid %s;">'
             '<table width="100%%" cellpadding="0" cellspacing="0" border="0"><tr>'
@@ -1567,8 +1567,6 @@ def build_html():
         FONT, day_col, esc(day_chg),
         FONT, MUTED, esc(vs200), ("  " if vs200 and vs50 else ""), esc(vs50),
         b_bg, b_fg, b_bdr, FONT, b_txt)
-
-    # VERDICTS
     out += ('<tr><td bgcolor="%s" style="background:%s;padding:10px 16px;'
             'border-bottom:1px solid %s;">'
             '<table width="100%%" cellpadding="0" cellspacing="0" border="0"><tr>'
@@ -1590,19 +1588,13 @@ def build_html():
         FONT, MUTED, FONT, TEXT, esc(primary or "n/a"),
         BORDER, FONT, MUTED, FONT, TEXT, esc(layer2 or "n/a"),
         FONT, MUTED, esc(gate_note))
-
-    # INDICATORS LABEL
     out += ('<tr><td bgcolor="%s" style="background:%s;padding:7px 16px 3px;">'
             '<span style="font-family:%s;font-size:9px;font-weight:700;color:%s;'
             'text-transform:uppercase;letter-spacing:0.8px;">Indicators</span>'
             '</td></tr>') % (CARD2, CARD2, FONT, MUTED)
-
-    # GRID
     out += ('<tr><td bgcolor="%s" style="background:%s;padding:4px 13px 10px;">'
             '<table width="100%%" cellpadding="0" cellspacing="0" border="0">%s</table>'
             '</td></tr>') % (CARD2, CARD2, grid_rows)
-
-    # TALLY
     out += ('<tr><td bgcolor="%s" style="background:%s;padding:10px 16px;'
             'border-top:1px solid %s;text-align:center;">'
             '<table cellpadding="0" cellspacing="0" border="0" align="center"><tr>'
@@ -1625,8 +1617,6 @@ def build_html():
         FONT, RED, n_red, RED,
         FONT, BORDER, AMBER, n_amber, AMBER,
         FONT, BORDER, GREEN, n_green, GREEN)
-
-    # FOOTER
     out += ('<tr><td bgcolor="%s" style="background:%s;padding:9px 16px;'
             'border-top:1px solid %s;border-radius:0 0 10px 10px;text-align:center;">'
             '<div style="font-family:%s;font-size:9px;color:%s;line-height:1.6;">'
@@ -1635,12 +1625,6 @@ def build_html():
             '</div></td></tr>') % (
         CARD2, CARD2, BORDER, FONT, MUTED,
         TILES_WITH_DATA, TOTAL_TILES, esc(now))
-
-    # ---- METHODOLOGY LEGEND (always-visible; appended below tally + footer) ----
-    # No JS (Gmail strips it): a static, muted "why these metrics" section grouped
-    # by each metric's ACTUAL role in the verdict logic (gate / Layer-2 entry input
-    # / breadth-divergence / informational-tally). Rules-based signal, not a
-    # weighted average, so roles are described - no fabricated numeric weights.
     _lg_hdr = "font-family:%s;font-size:11px;font-weight:700;color:%s;text-transform:uppercase;letter-spacing:0.4px;padding:2px 0 5px 0;" % (FONT, SUB)
     _lg_row = "font-family:%s;font-size:10px;color:%s;line-height:1.45;padding:1px 0;" % (FONT, MUTED)
     _lg_tag = "font-weight:700;color:%s;"
@@ -1658,27 +1642,42 @@ def build_html():
         + '<div style="font-family:%s;font-size:9px;color:%s;padding-bottom:9px;">'
           'Rules-based signal (not a weighted average). Each line: what it signals '
           '&amp; how it is used.</div>' % (FONT, MUTED)
-        + ('<div style="%s">Gates &mdash; hard conditions that cap or open short conviction</div>' % _lg_hdr)
+        + ('<div style="%s">Gates &mdash; ALL must be open before INITIATE SHORT can fire</div>' % _lg_hdr)
+        + _lgm(RED, "Dual-red streak",
+               "Breadth <50% AND net liquidity declining for 3 consecutive trading sessions (session-guarded; weekend runs cannot inflate it). The core PRIMARY trigger.")
         + _lgm(RED, "200DMA gate",
-               "SPX vs its 200-day MA. Above = long-term uptrend intact, so short conviction is capped to caution (amber); below = structural short regime valid. Hard cap on conviction.")
+               "SPX vs its 200-day MA. Above = long-term uptrend intact, INITIATE blocked; below = structural short regime valid.")
+        + _lgm(RED, "Monthly-trend gate",
+               "SPX vs its 10-month EMA (monthly SPY closes). INITIATE only fires when SPX is BELOW; above or unknown blocks it.")
+        + _lgm(RED, "Volume gate",
+               "Breakdown-session SPY volume must be >= 1.2x the 20-day average; sub-average or unknown volume = WAIT.")
+        + _lgm(RED, "R:R gate",
+               "Reward:risk >= 5.0 required. Stop = 5-day high (override RR_STOP); target = measured-move projection (override RR_TARGET). Unknown = blocked.")
         + _lgm(RED, "Calendar gate (tile 12)",
-               "FOMC / OpEx proximity (the monthly-cycle gate). The Layer-2 ENTRY SIGNAL can only fire when the calendar is clear (no event within ~2 days). Hard AND-condition on entry.")
+               "FOMC within 2 days blocks INITIATE. The 10-day OpEx Structural Transition Window is flagged as CALENDAR GATE — TRANSITION WINDOW.")
         + ('<div style="%s">Layer-2 entry inputs &mdash; the 2-of-3 ENTRY SIGNAL set</div>' % _lg_hdr)
         + _lgm(AMBER, "VIX term structure (tile 17)",
-               "VIX / VIX3M. Backwardation = near-term fear &gt; forward fear, a stress tell. Counts as 1 of the 3 entry inputs.")
+               "VIX / VIX3M. Backwardation = near-term fear &gt; forward fear, a stress tell. 1 of 3 entry inputs.")
         + _lgm(AMBER, "McClellan / NYMO divergence (tile 14)",
-               "NYMO red (breadth momentum negative) WHILE SPX sits near its 52-week high = price/breadth divergence. Counts as 1 of the 3 entry inputs.")
-        + _lgm(AMBER, "GEX flip (Layer-2 input)",
-               "Dealer gamma flip from positive to negative (amplifies moves). Source paywalled, so held as an explicit unavailable input to keep the 2-of-3 math intentional.")
+               "NYMO negative WHILE SPX sits near its 52-week high = price/breadth divergence. 1 of 3 entry inputs.")
+        + _lgm(AMBER, "GEX flip (manual input)",
+               "Dealer gamma flip to negative. No free live source (SpotGamma paywalled) — set env GEX_FLIP=1 or state.json gex_flip_manual when confirmed.")
         + ('<div style="%s">Breadth / divergence</div>' % _lg_hdr)
         + _lgm(GREEN, "Market breadth (tile 7)",
-               "% of names advancing. Below 50% = deteriorating participation; one of the two PRIMARY WATCHING triggers and feeds the decay streak.")
+               "% of names advancing (FMP sectors, WSJ NYSE A/D fallback). Below 50% = one of the two dual-red triggers.")
         + _lgm(GREEN, "Net liquidity (tile 8)",
-               "Fed balance sheet minus TGA/RRP direction. Declining drains support; the co-equal PRIMARY WATCHING trigger paired with breadth (both RED = confirm the 3-day streak).")
+               "Fed balance sheet minus TGA/RRP direction. Declining = the co-equal dual-red trigger paired with breadth.")
         + _lgm(GREEN, "Breadth proxy RSP/SPY (tile 18)",
-               "Equal-weight vs cap-weight direction. Narrowing while SPX near highs confirms a breadth divergence; broadening is healthy.")
+               "Equal-weight vs cap-weight direction. Narrowing while SPX near highs confirms a breadth divergence.")
         + _lgm(GREEN, "Breadth-decay streak",
-               "Consecutive sessions of red breadth. Confirms persistence (the 3-day streak) rather than a one-day dip; context for the PRIMARY verdict.")
+               "Consecutive TRADING SESSIONS of red breadth (session-guarded). Persistence context for the PRIMARY verdict.")
+        + ('<div style="%s">Sizing &amp; risk</div>' % _lg_hdr)
+        + _lgm(AMBER, "Signal-strength sizing",
+               "8-11 red tiles = standard, 12-15 = 1.5x, 16-19 = 2x (cap). MAX CONVICTION requires Pt11 (sector rotation) AND Pt16 (AAII) both red.")
+        + _lgm(AMBER, "Catalyst / post-loss flags",
+               "Size halves until CATALYST_ON=1 confirms an active catalyst; halves again while POST_LOSS_DESIZE=1 after a 2% exit trigger.")
+        + _lgm(AMBER, "Exit rule",
+               "2% adverse within 3 sessions = full exit, no averaging down.")
         + ('<div style="%s">Informational / tally &mdash; context + colour count, not gating</div>' % _lg_hdr)
         + _lgm(MUTED, "Volatility / VIX (tile 2)", "Level of implied vol - overall risk temperature.")
         + _lgm(MUTED, "Rates / 2s10s (tile 3)", "Yield-curve slope; inversion is a recession/risk tell.")
@@ -1688,77 +1687,56 @@ def build_html():
         + _lgm(MUTED, "Positioning / COT (tile 9)", "Futures positioning of large traders - crowding context.")
         + _lgm(MUTED, "VVIX divergence (tile 10)", "Vol-of-vol vs VIX - hedging-demand context.")
         + _lgm(MUTED, "Sector rotation (tile 11)", "Defensive vs broad leadership (derived from breadth).")
-        + _lgm(MUTED, "Fiscal impulse (tile 13)", "Direction of fiscal support - macro backdrop.")
+        + _lgm(MUTED, "Fiscal impulse (tile 13)", "Point-19 MTS spec: deficit + outlays YoY + interest/receipts.")
         + _lgm(MUTED, "NAAIM exposure (tile 15)", "Active-manager equity exposure - sentiment/positioning.")
         + _lgm(MUTED, "AAII sentiment (tile 16)", "Retail bull/bear survey - contrarian sentiment context.")
         + '</td></tr>'
     )
     out += _legend
-
     out += '</table>'
     out += '</td></tr></table>'
     out += '</body></html>'
-
     return out
-
 final_signal = primary or "No verdict"
-
-# ---- summary card values for log line ----
 spx_card = fmt_money(spx_proxy) if spx_proxy else "n/a"
 vix_card = ("%.1f" % vix_px) if vix_px is not None else "n/a"
 sp_card  = ("%+d bps" % spread_bps) if spread_bps is not None else "n/a"
 br_card  = ("%d%%" % breadth) if breadth is not None else "n/a"
-
 html = build_html()
-
 plain = ("MacroSage SHORT signal - %s\nPRIMARY VERDICT: %s\nLAYER 2 VERDICT: %s\n\n%s\n\n"
          "%d of %d indicators retrieved. Research/educational only - not investment advice.\n"
          % (now, primary, layer2, final_signal, TILES_WITH_DATA, TOTAL_TILES))
-
-# ---- save a timestamped report (best-effort) ----
 try:
     rdir = os.path.join(HERE, "reports")
     os.makedirs(rdir, exist_ok=True)
-    stamp = datetime.datetime.now().strftime("%Y-%m-%d_%H%M")
+    stamp = eastern_now().strftime("%Y-%m-%d_%H%M")
     with open(os.path.join(rdir, "short_%s.html" % stamp), "w", encoding="utf-8") as fh:
         fh.write(html)
 except Exception as ex:
     log.warning("report save warning: %s", ex)
-
-
-# ===========================================================================
-# EMAIL
-# ===========================================================================
 def send_email():
     user = cfg("GMAIL_USER")
     pw = cfg("GMAIL_APP_PASSWORD").replace(" ", "")
     if not user or not pw:
         log.error("EMAIL SKIPPED: missing GMAIL_USER / GMAIL_APP_PASSWORD secret")
         return False
-    # ---- MIME: multipart/mixed wrapping the multipart/alternative body ----
-    # The alternative body (plain + html) is the readable email; the interactive
-    # report (reports/short_*.html) is attached so the reader can open the fully
-    # interactive browser version. Attaching is best-effort and guarded: if the
-    # report is missing or attaching fails we log a warning and still send.
     import glob as _glob
     from email.mime.base import MIMEBase
     from email import encoders as _encoders
-
-    subject = "SHORT Signal - %s Post-Market" % today
+    # Subject leads with the live verdict so an INITIATE fire is visible
+    # from the inbox without opening the email.
+    _tag = "INITIATE SHORT" if initiate_short else "Watching"
+    subject = "SHORT Signal [%s] - %s Post-Market" % (_tag, today)
     if IS_HOLIDAY:
         subject += " [US holiday]"
-
     _alt = MIMEMultipart("alternative")
     _alt.attach(MIMEText(plain, "plain", "utf-8"))
     _alt.attach(MIMEText(html, "html", "utf-8"))
-
     msg = MIMEMultipart("mixed")
     msg["Subject"] = subject
     msg["From"] = user
     msg["To"] = ", ".join(RECIPIENTS)
     msg.attach(_alt)
-
-    # ---- attach the interactive HTML report (best-effort; never breaks send) ----
     try:
         _rdir = os.path.join(HERE, "reports")
         _reports = sorted(_glob.glob(os.path.join(_rdir, "short_*.html")))
@@ -1793,29 +1771,18 @@ def send_email():
     except Exception as e:
         log.error("EMAIL ERROR: %s", e)
         return False
-
-
 if __name__ == "__main__":
     log.info("=== SHORT dashboard %s ===", now)
     log.info("SPX(SPYx10): %s | VIX: %s | 2s10s: %s | Breadth: %s",
              spx_card, vix_card, sp_card, br_card)
     log.info("PRIMARY: %s | LAYER2: %s", primary, layer2)
     log.info("recipients: %s", ", ".join(RECIPIENTS))
-
     email_ok = False
     try:
         email_ok = send_email()
     except Exception as ex:
         log.error("EMAIL ERROR (unhandled): %s", ex)
-
-    # persist last-known values for the next run's fallback
     CACHE.save()
-
-    # final one-line summary
     log.info("Run complete - %d/%d signals retrieved, email sent: %s",
              TILES_WITH_DATA, TOTAL_TILES, "YES" if email_ok else "NO")
-
-    # Exit 0 even on email failure: a missed email should not mark the whole
-    # scheduled job red (the log already states what failed). Only a hard crash
-    # above this point (which we guard against) produces a non-zero exit.
     sys.exit(0)
