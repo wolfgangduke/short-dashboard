@@ -1360,21 +1360,23 @@ else:
     log.warning("MONTHLY TREND GATE: insufficient monthly SPY closes (%s); gate UNKNOWN",
                 len(_spy_monthly) if _spy_monthly else 0)
 
+# Hard enforcement (runs BEFORE appending the gate note so it can never clobber
+# the note's own "INITIATE SHORT blocked" wording): INITIATE SHORT may only be
+# emitted when the gate is OPEN (SPX confirmed BELOW its 10M EMA). If above or
+# unknown, strip any INITIATE / SHORT NOW escalation already in the primary
+# verdict so the pill cannot show it.
+if spx_above_10mema is not False:
+    _pv_up = primary.upper()
+    if "INITIATE" in _pv_up or "SHORT NOW" in _pv_up:
+        log.info("MONTHLY TREND GATE: blocking INITIATE SHORT (gate not open)")
+        primary = primary.replace("INITIATE SHORT", "WATCHING").replace("INITIATE", "WATCHING").replace("SHORT NOW", "WATCHING")
+
 if spx_above_10mema is True:
     primary = primary + (" | MONTHLY TREND GATE: SPX above 10M EMA (~%.0f) — INITIATE SHORT blocked" % spx_10mema)
 elif spx_above_10mema is False:
     primary = primary + " | MONTHLY TREND GATE: SPX below 10M EMA — gate open for INITIATE SHORT"
 else:
     primary = primary + " | MONTHLY TREND GATE: 10M EMA unavailable — gate UNKNOWN, INITIATE SHORT blocked"
-
-# Hard enforcement: INITIATE SHORT may only be emitted when the gate is OPEN
-# (SPX confirmed BELOW its 10M EMA). If above or unknown, strip any INITIATE/
-# SHORT NOW escalation from the primary verdict so the pill cannot show it.
-if spx_above_10mema is not False:
-    _pv_up = primary.upper()
-    if "INITIATE" in _pv_up or "SHORT NOW" in _pv_up:
-        log.info("MONTHLY TREND GATE: blocking INITIATE SHORT (gate not open)")
-        primary = primary.replace("INITIATE SHORT", "WATCHING").replace("INITIATE", "WATCHING").replace("SHORT NOW", "WATCHING")
 
 # ---- BREADTH DECAY STREAK ----
 _prev_bd = CACHE.get("breadth_decay_streak") or 0
