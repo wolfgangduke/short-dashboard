@@ -567,6 +567,37 @@ def _yahoo_closes_range(symbol, rng="6mo"):
         return None
 
 
+def _yahoo_monthly_closes(symbol, rng="3y"):
+    """Monthly closes (oldest-first) via Yahoo interval=1mo. Returns
+    list[float] oldest-first or None on failure. Used by the monthly-trend
+    gate to derive the SPX 10-month EMA. No new dependencies; reuses
+    http_get_json + UA_HDR like the other Yahoo fetchers.
+    """
+    url = ("https://query1.finance.yahoo.com/v8/finance/chart/%s"
+           "?range=%s&interval=1mo" % (symbol, rng))
+    d, _ = http_get_json(url, headers=UA_HDR)
+    try:
+        q = d["chart"]["result"][0]["indicators"]["quote"][0]["close"]
+        vals = [float(c) for c in q if c is not None]
+        return vals or None
+    except Exception:
+        return None
+
+
+def _ema(values, period):
+    """Classic EMA over oldest-first values. Seeds with the SMA of the first
+    <period> points, then applies k = 2/(period+1). Returns the final EMA or
+    None if there aren't enough points. No fabrication: caller handles None.
+    """
+    if not values or len(values) < period:
+        return None
+    k = 2.0 / (period + 1)
+    ema = sum(values[:period]) / float(period)  # SMA seed
+    for v in values[period:]:
+        ema = v * k + ema * (1 - k)
+    return ema
+
+
 def fetch_rsp_spy_ratio(n=120):
     """Equal-weight vs cap-weight breadth proxy: daily RSP/SPY close ratio.
 
@@ -1306,6 +1337,45 @@ if spx_above_200dma is True:
 elif spx_above_200dma is False:
     primary = primary + " | 200DMA: SPX BELOW 200MA — structural short regime valid"
 
+# ---- MONTHLY TREND GATE (SPX 10-month EMA) ----
+# Methodology rule: SPX must be BELOW its 10-month EMA before an INITIATE SHORT
+# verdict can fire. Hard gate, mirroring the 200DMA gate above. Computed from
+# monthly SPY closes (Yahoo interval=1mo, range=3y -> >=10 monthly closes).
+# Graceful fallback: if monthly data is unavailable the gate is UNKNOWN (logged,
+# never fabricated) and, because "below" cannot be confirmed, INITIATE stays
+# blocked.
+spx_above_10mema = None  # None = unknown
+spx_10mema = None
+_spy_monthly = _yahoo_monthly_closes("SPY", "3y")
+if _spy_monthly and len(_spy_monthly) >= 10:
+    spx_10mema = _ema(_spy_monthly, 10)
+    if spx_10mema is not None and spy_px is not None:
+        spx_above_10mema = (spy_px >= spx_10mema)
+        log.info("MONTHLY TREND GATE: SPY %.2f vs 10M EMA %.2f -> above=%s (%d monthly closes)",
+                 spy_px, spx_10mema, spx_above_10mema, len(_spy_monthly))
+    else:
+        log.warning("MONTHLY TREND GATE: 10M EMA=%s but SPY price unavailable; gate UNKNOWN",
+                    ("%.2f" % spx_10mema) if spx_10mema is not None else "None")
+else:
+    log.warning("MONTHLY TREND GATE: insufficient monthly SPY closes (%s); gate UNKNOWN",
+                len(_spy_monthly) if _spy_monthly else 0)
+
+if spx_above_10mema is True:
+    primary = primary + (" | MONTHLY TREND GATE: SPX above 10M EMA (~%.0f) — INITIATE SHORT blocked" % spx_10mema)
+elif spx_above_10mema is False:
+    primary = primary + " | MONTHLY TREND GATE: SPX below 10M EMA — gate open for INITIATE SHORT"
+else:
+    primary = primary + " | MONTHLY TREND GATE: 10M EMA unavailable — gate UNKNOWN, INITIATE SHORT blocked"
+
+# Hard enforcement: INITIATE SHORT may only be emitted when the gate is OPEN
+# (SPX confirmed BELOW its 10M EMA). If above or unknown, strip any INITIATE/
+# SHORT NOW escalation from the primary verdict so the pill cannot show it.
+if spx_above_10mema is not False:
+    _pv_up = primary.upper()
+    if "INITIATE" in _pv_up or "SHORT NOW" in _pv_up:
+        log.info("MONTHLY TREND GATE: blocking INITIATE SHORT (gate not open)")
+        primary = primary.replace("INITIATE SHORT", "WATCHING").replace("INITIATE", "WATCHING").replace("SHORT NOW", "WATCHING")
+
 # ---- BREADTH DECAY STREAK ----
 _prev_bd = CACHE.get("breadth_decay_streak") or 0
 if breadth_red:
@@ -1663,6 +1733,8 @@ def build_html():
                "SPX vs its 200-day MA. Above = long-term uptrend intact, so short conviction is capped to caution (amber); below = structural short regime valid. Hard cap on conviction.")
         + _lgm(RED, "Calendar gate (tile 12)",
                "FOMC / OpEx proximity (the monthly-cycle gate). The Layer-2 ENTRY SIGNAL can only fire when the calendar is clear (no event within ~2 days). Hard AND-condition on entry.")
+        + _lgm(RED, "Monthly-trend gate",
+               "SPX vs its 10-month EMA (monthly SPY closes). INITIATE SHORT can only fire when SPX is BELOW the 10M EMA; above (or unknown) blocks it. Hard gate on entry.")
         + ('<div style="%s">Layer-2 entry inputs &mdash; the 2-of-3 ENTRY SIGNAL set</div>' % _lg_hdr)
         + _lgm(AMBER, "VIX term structure (tile 17)",
                "VIX / VIX3M. Backwardation = near-term fear &gt; forward fear, a stress tell. Counts as 1 of the 3 entry inputs.")
