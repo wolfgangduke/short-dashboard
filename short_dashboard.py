@@ -1636,6 +1636,65 @@ def build_html():
         CARD2, CARD2, BORDER, FONT, MUTED,
         TILES_WITH_DATA, TOTAL_TILES, esc(now))
 
+    # ---- METHODOLOGY LEGEND (always-visible; appended below tally + footer) ----
+    # No JS (Gmail strips it): a static, muted "why these metrics" section grouped
+    # by each metric's ACTUAL role in the verdict logic (gate / Layer-2 entry input
+    # / breadth-divergence / informational-tally). Rules-based signal, not a
+    # weighted average, so roles are described - no fabricated numeric weights.
+    _lg_hdr = "font-family:%s;font-size:11px;font-weight:700;color:%s;text-transform:uppercase;letter-spacing:0.4px;padding:2px 0 5px 0;" % (FONT, SUB)
+    _lg_row = "font-family:%s;font-size:10px;color:%s;line-height:1.45;padding:1px 0;" % (FONT, MUTED)
+    _lg_tag = "font-weight:700;color:%s;"
+    def _lgm(tag_col, name, body):
+        return ('<div style="%s"><span style="%s">%s</span> &mdash; %s</div>'
+                % (_lg_row, (_lg_tag % tag_col), esc(name), esc(body)))
+    _legend = (
+        '<tr><td bgcolor="%s" style="background:%s;padding:12px 16px 14px 16px;'
+        'border-top:1px solid %s;">' % (CARD2, CARD2, BORDER)
+        + '<div style="font-family:%s;font-size:11px;font-weight:700;color:%s;'
+          'letter-spacing:0.3px;padding-bottom:2px;">'
+          '&#9432; Why these metrics'
+          '<span style="font-weight:400;color:%s;"> &mdash; see foot</span></div>'
+          % (FONT, TEXT, MUTED)
+        + '<div style="font-family:%s;font-size:9px;color:%s;padding-bottom:9px;">'
+          'Rules-based signal (not a weighted average). Each line: what it signals '
+          '&amp; how it is used.</div>' % (FONT, MUTED)
+        + ('<div style="%s">Gates &mdash; hard conditions that cap or open short conviction</div>' % _lg_hdr)
+        + _lgm(RED, "200DMA gate (tile 1)",
+               "SPX vs its 200-day MA. Above = long-term uptrend intact, so short conviction is capped to caution (amber); below = structural short regime valid. Hard cap on conviction.")
+        + _lgm(RED, "Calendar gate (tile 12)",
+               "FOMC / OpEx proximity (the monthly-cycle gate). The Layer-2 ENTRY SIGNAL can only fire when the calendar is clear (no event within ~2 days). Hard AND-condition on entry.")
+        + ('<div style="%s">Layer-2 entry inputs &mdash; the 2-of-3 ENTRY SIGNAL set</div>' % _lg_hdr)
+        + _lgm(AMBER, "VIX term structure (tile 17)",
+               "VIX / VIX3M. Backwardation = near-term fear &gt; forward fear, a stress tell. Counts as 1 of the 3 entry inputs.")
+        + _lgm(AMBER, "McClellan / NYMO divergence (tile 14)",
+               "NYMO red (breadth momentum negative) WHILE SPX sits near its 52-week high = price/breadth divergence. Counts as 1 of the 3 entry inputs.")
+        + _lgm(AMBER, "GEX flip (Layer-2 input)",
+               "Dealer gamma flip from positive to negative (amplifies moves). Source paywalled, so held as an explicit unavailable input to keep the 2-of-3 math intentional.")
+        + ('<div style="%s">Breadth / divergence</div>' % _lg_hdr)
+        + _lgm(GREEN, "Market breadth (tile 7)",
+               "% of names advancing. Below 50% = deteriorating participation; one of the two PRIMARY WATCHING triggers and feeds the decay streak.")
+        + _lgm(GREEN, "Breadth proxy RSP/SPY (tile 18)",
+               "Equal-weight vs cap-weight direction. Narrowing while SPX near highs confirms a breadth divergence; broadening is healthy.")
+        + _lgm(GREEN, "Breadth-decay streak",
+               "Consecutive sessions of red breadth. Confirms persistence (the 3-day streak) rather than a one-day dip; context for the PRIMARY verdict.")
+        + ('<div style="%s">Informational / tally &mdash; context + colour count, not gating</div>' % _lg_hdr)
+        + _lgm(MUTED, "Net liquidity (tile 8)",
+               "Fed balance sheet minus TGA/RRP direction. Declining drains support; the second PRIMARY WATCHING trigger alongside breadth.")
+        + _lgm(MUTED, "Volatility / VIX (tile 2)", "Level of implied vol - overall risk temperature.")
+        + _lgm(MUTED, "Rates / 2s10s (tile 3)", "Yield-curve slope; inversion is a recession/risk tell.")
+        + _lgm(MUTED, "Credit spreads (tile 4)", "Stress in corporate credit - widening = risk-off.")
+        + _lgm(MUTED, "Commodities / Gold (tile 5)", "Safe-haven / real-asset context.")
+        + _lgm(MUTED, "Dollar / FX (tile 6)", "USD strength; a rising dollar tightens global conditions.")
+        + _lgm(MUTED, "Positioning / COT (tile 9)", "Futures positioning of large traders - crowding context.")
+        + _lgm(MUTED, "VVIX divergence (tile 10)", "Vol-of-vol vs VIX - hedging-demand context.")
+        + _lgm(MUTED, "Sector rotation (tile 11)", "Defensive vs broad leadership (derived from breadth).")
+        + _lgm(MUTED, "Fiscal impulse (tile 13)", "Direction of fiscal support - macro backdrop.")
+        + _lgm(MUTED, "NAAIM exposure (tile 15)", "Active-manager equity exposure - sentiment/positioning.")
+        + _lgm(MUTED, "AAII sentiment (tile 16)", "Retail bull/bear survey - contrarian sentiment context.")
+        + '</td></tr>'
+    )
+    out += _legend
+
     out += '</table>'
     out += '</td></tr></table>'
     out += '</body></html>'
@@ -1676,15 +1735,47 @@ def send_email():
     if not user or not pw:
         log.error("EMAIL SKIPPED: missing GMAIL_USER / GMAIL_APP_PASSWORD secret")
         return False
-    msg = MIMEMultipart("alternative")
+    # ---- MIME: multipart/mixed wrapping the multipart/alternative body ----
+    # The alternative body (plain + html) is the readable email; the interactive
+    # report (reports/short_*.html) is attached so the reader can open the fully
+    # interactive browser version. Attaching is best-effort and guarded: if the
+    # report is missing or attaching fails we log a warning and still send.
+    import glob as _glob
+    from email.mime.base import MIMEBase
+    from email import encoders as _encoders
+
     subject = "SHORT Signal - %s Post-Market" % today
     if IS_HOLIDAY:
         subject += " [US holiday]"
+
+    _alt = MIMEMultipart("alternative")
+    _alt.attach(MIMEText(plain, "plain", "utf-8"))
+    _alt.attach(MIMEText(html, "html", "utf-8"))
+
+    msg = MIMEMultipart("mixed")
     msg["Subject"] = subject
     msg["From"] = user
     msg["To"] = ", ".join(RECIPIENTS)
-    msg.attach(MIMEText(plain, "plain", "utf-8"))
-    msg.attach(MIMEText(html, "html", "utf-8"))
+    msg.attach(_alt)
+
+    # ---- attach the interactive HTML report (best-effort; never breaks send) ----
+    try:
+        _rdir = os.path.join(HERE, "reports")
+        _reports = sorted(_glob.glob(os.path.join(_rdir, "short_*.html")))
+        if _reports:
+            _rpath = _reports[-1]
+            with open(_rpath, "rb") as _rf:
+                _part = MIMEBase("text", "html")
+                _part.set_payload(_rf.read())
+            _encoders.encode_base64(_part)
+            _part.add_header("Content-Disposition", "attachment",
+                             filename=os.path.basename(_rpath))
+            msg.attach(_part)
+            log.info("attached interactive report: %s", os.path.basename(_rpath))
+        else:
+            log.warning("no interactive report found in %s; sending email without attachment", _rdir)
+    except Exception as _aex:
+        log.warning("report attach failed (%s); sending email without attachment", _aex)
     ctx = ssl.create_default_context()
     try:
         with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=ctx, timeout=30) as s:
