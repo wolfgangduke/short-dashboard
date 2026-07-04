@@ -1861,11 +1861,10 @@ def send_email():
     msg["Subject"] = subject
     msg["From"] = user
     msg["To"] = ", ".join(DEFAULT_RECIPIENTS)
-   _cc = [a for a in RECIPIENTS if a not in DEFAULT_RECIPIENTS]
-  if _cc:
-     msg["Cc"] = ", ".join(_cc)
- 
-
+    _cc = [a for a in RECIPIENTS if a not in DEFAULT_RECIPIENTS]
+    if _cc:
+        msg["Cc"] = ", ".join(_cc)
+     
     msg.attach(_alt)
     try:
         _rdir = os.path.join(HERE, "reports")
