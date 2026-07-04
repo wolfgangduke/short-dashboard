@@ -49,7 +49,7 @@ def _utcnow():
     return datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
 HERE = os.path.dirname(os.path.abspath(__file__))
 STATE_PATH = os.path.join(HERE, "state.json")
-DEFAULT_RECIPIENTS = ["wolfgangduke@gmail.com", "richard.macrae.gordon@gmail.com"]
+DEFAULT_RECIPIENTS = ["wolfgangduke@gmail.com"]
 TOTAL_TILES = 18  # number of indicator tiles the engine computes
 # ---------------------------------------------------------------------------
 # Config / secrets
@@ -1860,7 +1860,11 @@ def send_email():
     msg = MIMEMultipart("mixed")
     msg["Subject"] = subject
     msg["From"] = user
-    msg["To"] = ", ".join(RECIPIENTS)
+    msg["To"] = ", ".join(DEFAULT_RECIPIENTS)
+    _cc = [a for a in RECIPIENTS if a not in DEFAULT_RECIPIENTS]
+    if _cc:
+        msg["Cc"] = ", ".join(_cc)
+     
     msg.attach(_alt)
     try:
         _rdir = os.path.join(HERE, "reports")
