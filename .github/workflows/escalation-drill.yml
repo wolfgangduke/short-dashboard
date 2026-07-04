@@ -1,0 +1,43 @@
+name: escalation-drill
+
+on:
+  workflow_dispatch:
+    inputs:
+      scenario:
+        description: "Drill scenario to simulate"
+        type: choice
+        default: full_escalation
+        options:
+          - full_escalation
+          - blocked_200dma
+          - blocked_streak
+          - blocked_10m_ema
+          - blocked_volume
+          - blocked_rr
+          - blocked_fomc
+          - missing_monthly
+          - missing_volume
+          - missing_history
+
+jobs:
+  drill:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Scenario tests (verdict engine, stubbed HTTP)
+        run: python test_harness.py
+
+      - name: Simulation drill (renders real email HTML; no email, no state writes)
+        run: python sim_drill.py --scenario "${{ inputs.scenario }}" --out reports
+
+      - name: Upload rendered drill HTML as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: escalation-drill-${{ inputs.scenario }}
+          path: reports/simulation_*.html
+          if-no-files-found: error
