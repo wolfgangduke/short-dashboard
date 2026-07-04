@@ -1094,12 +1094,12 @@ else:
         vix_ts_sub = "VIX/VIX3M ratio %.3f (last known)" % _cached_ratio
         vix_ts_col = "amber"
         log.warning("VIX term structure: using cache (%.3f)", _cached_ratio)
-# GEX flip: still no free live source (SpotGamma paywalled). Now a MANUAL
-# input instead of a hardcoded False: set env GEX_FLIP=1 (or state.json key
-# "gex_flip_manual") when dealer gamma has flipped negative. Fail-safe: off.
-gamma_flip = (cfg("GEX_FLIP") == "1") or bool(CACHE.get("gex_flip_manual"))
-if gamma_flip:
-    log.info("GEX flip: MANUAL input active (env/state) — counted in Layer-2")
+# Layer-2 vol-regime signal: the paywalled GEX/dealer-gamma flip is replaced by
+# a keyless REALIZED-VOLATILITY EXPANSION measure (computed below, once SPY
+# history is available). Dealers short gamma amplify moves -> realized vol
+# expands; that acceleration is the tradable tell. Manual GEX_FLIP=1 / state
+# "gex_flip_manual" still forces it on. Fail-safe: off.
+_gex_manual = (cfg("GEX_FLIP") == "1") or bool(CACHE.get("gex_flip_manual"))
 # ---- SPY daily history WITH VOLUME (Yahoo primary, Stooq fallback) ----
 # Volume feeds the new breakdown-volume gate; Stooq removes the single point
 # of failure where one Yahoo block froze every trend gate at 'last known'.
@@ -1182,6 +1182,27 @@ if _spy_vols and len(_spy_vols) >= 25:
                      _v_last, _v_avg20, vol_ratio)
 else:
     log.warning("volume gate: SPY volume unavailable — gate FAIL-CLOSED (blocks INITIATE)")
+# ---- VOL-EXPANSION SIGNAL (Layer-2, keyless): 5-day realized vol accelerating
+# vs its 20-day baseline (annualized, from SPY daily closes). Replaces the
+# retired GEX/dealer-gamma flip. Fail-safe: insufficient history -> off.
+vol_expansion = False
+rvol5 = rvol20 = None
+if _spy_hist and len(_spy_hist) >= 26:
+    _rets = [(_spy_hist[i] / _spy_hist[i - 1] - 1.0)
+             for i in range(1, len(_spy_hist)) if _spy_hist[i - 1]]
+    def _rms(xs):
+        if not xs:
+            return None
+        return (sum(x * x for x in xs) / len(xs)) ** 0.5
+    _s5, _s20 = _rms(_rets[-5:]), _rms(_rets[-20:])
+    if _s5 is not None and _s20 is not None and _s20 > 0:
+        rvol5, rvol20 = _s5 * (252 ** 0.5) * 100, _s20 * (252 ** 0.5) * 100
+        vol_expansion = (_s5 / _s20) >= 1.30
+        log.info("vol-expansion (Layer-2): rvol5=%.1f%% vs rvol20=%.1f%% -> "
+                 "ratio %.2f (fire >=1.30) = %s", rvol5, rvol20, _s5 / _s20, vol_expansion)
+else:
+    log.warning("vol-expansion: insufficient SPY history — signal off (fail-safe)")
+gamma_flip = bool(_gex_manual or vol_expansion)
 # ---- R:R GATE (2026-07-03): reward:risk must be >= 5.0, else WATCHING.
 #   entry  = current SPY price
 #   stop   = highest close of the last 5 sessions (floor: entry +0.5%)
@@ -1404,12 +1425,22 @@ elif n_red >= 8:
     size_mult, size_txt = 1.0, "standard (8-11 red)"
 else:
     size_mult, size_txt = 0.5, "probe only (<8 red)"
-catalyst_on = (cfg("CATALYST_ON") == "1") or bool(CACHE.get("catalyst_on"))
+# Catalyst auto-confirm (keyless): the down-move is objectively underway when
+# SPY prints a fresh 20-day low AND breakdown volume >=1.2x the 20d average
+# (the volume gate). Replaces the manual-only flag; env/state still force it on.
+_break_low = bool(spy_px is not None and _spy_hist and len(_spy_hist) >= 20
+                  and spy_px <= min(_spy_hist[-20:]))
+_break_vol = bool(vol_ratio is not None and vol_ratio >= 1.2)
+catalyst_auto = bool(_break_low and _break_vol)
+catalyst_on = ((cfg("CATALYST_ON") == "1") or bool(CACHE.get("catalyst_on"))
+               or catalyst_auto)
+if catalyst_auto:
+    log.info("catalyst auto-confirmed: SPY fresh 20d low + volume %.2fx breakdown", vol_ratio)
 post_loss = (cfg("POST_LOSS_DESIZE") == "1") or bool(CACHE.get("post_loss_desize"))
 size_notes = []
 if not catalyst_on:
     size_mult *= 0.5
-    size_notes.append("halved: no active catalyst confirmed (set CATALYST_ON=1)")
+    size_notes.append("halved: no active catalyst — need SPY fresh 20d low + >=1.2x volume, or CATALYST_ON=1")
 if post_loss:
     size_mult *= 0.5
     size_notes.append("halved: post-loss de-sizing active (clears after a profitable exit)")
@@ -1441,7 +1472,7 @@ _l2_signals = sum([gamma_flip, _vix_backwardation, mcclellan_divergence])
 _cal_clear = not any(x in cal_sub for x in ("in 0d", "in 1d", "in 2d"))
 if _l2_signals >= 2 and _cal_clear:
     _l2_names = []
-    if gamma_flip: _l2_names.append("GEX flip (manual)")
+    if gamma_flip: _l2_names.append("vol expansion" if vol_expansion else "GEX flip (manual)")
     if _vix_backwardation: _l2_names.append("VIX backwardation")
     if mcclellan_divergence: _l2_names.append("McClellan divergence")
     _why_low = []
@@ -1660,8 +1691,8 @@ def build_html():
                "VIX / VIX3M. Backwardation = near-term fear &gt; forward fear, a stress tell. 1 of 3 entry inputs.")
         + _lgm(AMBER, "McClellan / NYMO divergence (tile 14)",
                "NYMO negative WHILE SPX sits near its 52-week high = price/breadth divergence. 1 of 3 entry inputs.")
-        + _lgm(AMBER, "GEX flip (manual input)",
-               "Dealer gamma flip to negative. No free live source (SpotGamma paywalled) — set env GEX_FLIP=1 or state.json gex_flip_manual when confirmed.")
+        + _lgm(AMBER, "Realized-vol expansion (Layer-2)",
+               "5-day realized vol accelerating &gt;=1.30x its 20-day baseline (from SPY closes, keyless) = vol-regime expansion — the tell the old GEX flip proxied. Manual GEX_FLIP=1 still forces it. 1 of 3 entry inputs.")
         + ('<div style="%s">Breadth / divergence</div>' % _lg_hdr)
         + _lgm(GREEN, "Market breadth (tile 7)",
                "% of names advancing (FMP sectors, WSJ NYSE A/D fallback). Below 50% = one of the two dual-red triggers.")
@@ -1675,7 +1706,7 @@ def build_html():
         + _lgm(AMBER, "Signal-strength sizing",
                "8-11 red tiles = standard, 12-15 = 1.5x, 16-19 = 2x (cap). MAX CONVICTION requires Pt11 (sector rotation) AND Pt16 (AAII) both red.")
         + _lgm(AMBER, "Catalyst / post-loss flags",
-               "Size halves until CATALYST_ON=1 confirms an active catalyst; halves again while POST_LOSS_DESIZE=1 after a 2% exit trigger.")
+               "Catalyst auto-confirms when SPY prints a fresh 20-day low AND breakdown volume &gt;=1.2x (else size halves; CATALYST_ON=1 still forces it). Size halves again while POST_LOSS_DESIZE=1 after a 2% exit trigger.")
         + _lgm(AMBER, "Exit rule",
                "2% adverse within 3 sessions = full exit, no averaging down.")
         + ('<div style="%s">Informational / tally &mdash; context + colour count, not gating</div>' % _lg_hdr)

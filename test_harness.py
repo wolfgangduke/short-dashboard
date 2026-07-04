@@ -152,6 +152,7 @@ check("SPX above 200DMA" in gB["primary"], "200DMA named as blocker")
 htmlB = gB["build_html"]()
 check(">WATCHING<" in htmlB, "email banner shows WATCHING")
 check(">INITIATE SHORT<" not in htmlB, "banner does NOT show INITIATE SHORT")
+check(gB["catalyst_auto"] is False, "catalyst auto off at a fresh high (not a breakdown)")
 
 print("=" * 70)
 print("SCENARIO C: streak only 1/3 -> must stay WATCHING with streak blocker")
@@ -160,6 +161,16 @@ gC = run_scenario("streak", descending(520, 400.5, 251), 400.0,
                   {"dual_red_streak": {"value": 1, "ts": "2026-07-01T00:00:00"}})
 check(gC["initiate_short"] is False, "initiate_short is False")
 check("dual-red streak 1/3" in gC["primary"], "streak blocker named: %s" % gC["primary"].split(" | ")[0])
+
+print("=" * 70)
+print("SCENARIO D: keyless replacements -> vol-expansion + catalyst auto-confirm")
+print("=" * 70)
+gD = run_scenario("volexp", descending(470, 452, 246) + [445, 435, 422, 410, 400], 400.0,
+                  {"dual_red_streak": {"value": 3, "ts": "2026-07-01T00:00:00"}})
+check(gD["vol_expansion"] is True, "realized-vol expansion fires on a 5-day vol burst")
+check(gD["gamma_flip"] is True, "Layer-2 vol-regime input on (replaces manual GEX)")
+check(gD["catalyst_auto"] is True, "catalyst auto-confirmed from price/volume (not manual)")
+check(gD["catalyst_on"] is True, "catalyst_on True via auto path")
 
 print("=" * 70)
 print("RESULT: " + ("*** FAILURES ***" if FAILED else "ALL CHECKS PASSED"))
