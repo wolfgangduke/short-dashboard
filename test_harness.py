@@ -44,11 +44,15 @@ COT = [{
     "change_in_lev_money_long": "1000", "change_in_lev_money_short": "9000",
 }]
 
-def build_fixtures(spy_daily_closes, spy_px):
-    vols = [80_000_000.0] * len(spy_daily_closes)
-    vols[-1] = 120_000_000.0  # breakdown volume 1.5x
-    vols[-2] = 120_000_000.0  # in case the partial-bar guard drops the last
-    return [
+def build_fixtures(spy_daily_closes, spy_px, vols=None, extra=None):
+    """`vols` overrides SPY daily volumes (list, may contain None).
+    `extra` is a list of (host, path, payload) PREPENDED so the entries
+    shadow the matching defaults (first match wins in install_stub)."""
+    if vols is None:
+        vols = [80_000_000.0] * len(spy_daily_closes)
+        vols[-1] = 120_000_000.0  # breakdown volume 1.5x
+        vols[-2] = 120_000_000.0  # in case the partial-bar guard drops the last
+    return list(extra or []) + [
         # (host_substr, path_substr, payload)
         ("financialmodelingprep", "quote?symbol=SPY", [{"price": spy_px, "changePercentage": -2.5}]),
         ("financialmodelingprep", "quote?symbol=%5EVIX", [{"price": 28.0}]),
@@ -99,7 +103,7 @@ def install_stub(fixtures):
     urllib.request.urlopen = fake_urlopen
     time.sleep = lambda s: None
 
-def run_scenario(name, spy_closes, spy_px, seed_state):
+def run_scenario(name, spy_closes, spy_px, seed_state, vols=None, extra=None):
     d = tempfile.mkdtemp(prefix="short_%s_" % name)
     script = os.path.join(d, "short.py")
     shutil.copy(SRC, script)
@@ -108,7 +112,7 @@ def run_scenario(name, spy_closes, spy_px, seed_state):
     os.environ["FMP_API_KEY"] = "test"
     os.environ["FRED_API_KEY"] = "test"
     os.environ.pop("GMAIL_USER", None)
-    install_stub(build_fixtures(spy_closes, spy_px))
+    install_stub(build_fixtures(spy_closes, spy_px, vols=vols, extra=extra))
     g = runpy.run_path(script)  # run_name != __main__ -> no email/exit
     return g
 
@@ -171,6 +175,104 @@ check(gD["vol_expansion"] is True, "realized-vol expansion fires on a 5-day vol 
 check(gD["gamma_flip"] is True, "Layer-2 vol-regime input on (replaces manual GEX)")
 check(gD["catalyst_auto"] is True, "catalyst auto-confirmed from price/volume (not manual)")
 check(gD["catalyst_on"] is True, "catalyst_on True via auto path")
+
+print("=" * 70)
+print("SCENARIO E: 10M-EMA gate blocks + banner regression (INITIATE SHORT")
+print("            blocked text in primary must still render WATCHING)")
+print("=" * 70)
+gE = run_scenario("block10m", descending(520, 400.5, 251), 400.0,
+                  {"dual_red_streak": {"value": 3, "ts": "2026-07-01T00:00:00"}},
+                  extra=[("yahoo", "chart/SPY?range=3y&interval=1mo",
+                          yahoo_daily(descending(520, 300, 36)))])
+check(gE["spx_above_10mema"] is True, "SPX confirmed ABOVE 10M EMA")
+check(gE["initiate_short"] is False, "initiate_short is False")
+check("SPX above 10M EMA" in gE["primary"], "10M-EMA named as blocker")
+check("INITIATE SHORT blocked" in gE["primary"],
+      "primary carries the 'INITIATE SHORT blocked' gate note")
+htmlE = gE["build_html"]()
+check(">WATCHING<" in htmlE, "banner regression: renders WATCHING")
+check(">INITIATE SHORT<" not in htmlE,
+      "banner regression: red pill NOT shown despite 'INITIATE SHORT' in text")
+
+print("=" * 70)
+print("SCENARIO F: breakdown volume below 1.2x -> volume gate blocks")
+print("=" * 70)
+gF = run_scenario("blockvol", descending(520, 400.5, 251), 400.0,
+                  {"dual_red_streak": {"value": 3, "ts": "2026-07-01T00:00:00"}},
+                  vols=[80_000_000.0] * 251)
+check(gF["initiate_short"] is False, "initiate_short is False")
+check(gF["vol_ratio"] is not None and gF["vol_ratio"] < 1.2,
+      "volume ratio computed but sub-threshold (%.2fx)" % gF["vol_ratio"])
+check("< 1.2x" in gF["primary"], "volume named as blocker with ratio")
+check(gF["catalyst_auto"] is False, "catalyst auto stays off without breakdown volume")
+
+print("=" * 70)
+print("SCENARIO G: R:R below 5.0 (stop at 5-day swing high) -> R:R gate blocks")
+print("=" * 70)
+gG = run_scenario("blockrr",
+                  descending(520, 402, 246) + [447.0, 445.0, 430.0, 415.0, 400.5],
+                  400.0,
+                  {"dual_red_streak": {"value": 3, "ts": "2026-07-01T00:00:00"}})
+check(gG["initiate_short"] is False, "initiate_short is False")
+check(gG["rr_value"] is not None and gG["rr_value"] < 5.0,
+      "R:R computed but sub-threshold (%.1f)" % gG["rr_value"])
+check("< 5.0" in gG["primary"], "R:R named as blocker with value")
+
+print("=" * 70)
+print("SCENARIO H: FOMC within 2 days -> calendar/event-risk gate blocks")
+print("=" * 70)
+import datetime as _dt
+_fomc_date = (_dt.date.today() + _dt.timedelta(days=1)).isoformat()
+gH = run_scenario("blockfomc", descending(520, 400.5, 251), 400.0,
+                  {"dual_red_streak": {"value": 3, "ts": "2026-07-01T00:00:00"}},
+                  extra=[("financialmodelingprep", "economic-calendar",
+                          [{"event": "FOMC - Fed Interest Rate Decision",
+                            "country": "US", "date": _fomc_date}])])
+check(gH["fomc_days"] is not None and gH["fomc_days"] <= 2,
+      "FOMC detected inside 2-day window (%sd)" % gH["fomc_days"])
+check(gH["initiate_short"] is False, "initiate_short is False")
+check("FOMC within 2 days" in gH["primary"], "FOMC named as blocker")
+check("FOMC in" in gH["cal_sub"], "calendar tile flags the FOMC date")
+
+print("=" * 70)
+print("SCENARIO I: NO monthly closes -> 10M-EMA gate UNKNOWN, fails CLOSED")
+print("=" * 70)
+gI = run_scenario("nomonthly", descending(520, 400.5, 251), 400.0,
+                  {"dual_red_streak": {"value": 3, "ts": "2026-07-01T00:00:00"}},
+                  extra=[("yahoo", "chart/SPY?range=3y&interval=1mo",
+                          yahoo_daily([]))])
+check(gI["spx_10mema"] is None, "10M EMA never fabricated (None)")
+check(gI["spx_above_10mema"] is None, "10M-EMA gate is UNKNOWN (None)")
+check(gI["initiate_short"] is False, "initiate_short is False (fail-closed)")
+check("10M-EMA gate unknown" in gI["primary"], "unknown gate named as blocker")
+
+print("=" * 70)
+print("SCENARIO J: NO volume data -> volume gate UNKNOWN, fails CLOSED")
+print("=" * 70)
+gJ = run_scenario("novol", descending(520, 400.5, 251), 400.0,
+                  {"dual_red_streak": {"value": 3, "ts": "2026-07-01T00:00:00"}},
+                  vols=[None] * 251)
+check(gJ["vol_ratio"] is None, "volume ratio never fabricated (None)")
+check(gJ["initiate_short"] is False, "initiate_short is False (fail-closed)")
+check("volume unknown" in gJ["primary"], "unknown volume named as blocker")
+check(gJ["catalyst_auto"] is False, "catalyst auto off without volume confirmation")
+
+print("=" * 70)
+print("SCENARIO K: NO daily history -> 200DMA/volume/R:R all UNKNOWN, fail CLOSED")
+print("=" * 70)
+gK = run_scenario("nohist", descending(470, 455, 25), 400.0,
+                  {"dual_red_streak": {"value": 3, "ts": "2026-07-01T00:00:00"}})
+check(gK["rr_value"] is None, "R:R never fabricated (None)")
+check(gK["vol_ratio"] is None, "volume ratio never fabricated (None)")
+check(gK["spx_above_200dma"] is None, "200DMA gate is UNKNOWN (None)")
+check(gK["initiate_short"] is False, "initiate_short is False (fail-closed)")
+check("R:R unknown" in gK["primary"], "R:R unknown named as blocker")
+check("volume unknown" in gK["primary"], "volume unknown named as blocker")
+check("200DMA gate unknown" in gK["primary"], "200DMA unknown named as blocker")
+check(gK["vol_expansion"] is False, "vol-expansion stays off without history")
+htmlK = gK["build_html"]()
+check(">WATCHING<" in htmlK and ">INITIATE SHORT<" not in htmlK,
+      "banner shows WATCHING on missing data, never the red pill")
 
 print("=" * 70)
 print("RESULT: " + ("*** FAILURES ***" if FAILED else "ALL CHECKS PASSED"))
