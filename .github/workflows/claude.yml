@@ -9,7 +9,7 @@ on:
 
 jobs:
   claude:
-    if: contains(github.event.comment.body, '@claude') || contains(github.event.issue.body, '@claude')
+    if: github.event.sender.type != 'Bot' && (contains(github.event.comment.body, '@claude') || contains(github.event.issue.body, '@claude'))
     runs-on: ubuntu-latest
     permissions:
       contents: write
