@@ -18,6 +18,7 @@ on:
           - missing_monthly
           - missing_volume
           - missing_history
+          - pre_alert
 
 jobs:
   drill:

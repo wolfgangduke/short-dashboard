@@ -604,9 +604,13 @@ def compute_vix_term_structure(cache):
                 log.info("VIX term structure: VIX=%.2f VIX3M=%.2f ratio=%.4f -> %s"
                          " (backwardation streak=%d, %s)",
                          vix, v3, ratio, regime, streak, day)
+                # Issue #17: full common-date ratio series for the
+                # term-structure VELOCITY measure (rate of flattening).
+                _series = [vix_map[d] / v3_map[d] for d in common
+                           if v3_map[d] and 5 <= vix_map[d] <= 150 and 5 <= v3_map[d] <= 150]
                 return {"vix": vix, "vix3m": v3, "ratio": ratio,
                         "regime": regime, "streak": streak, "date": day,
-                        "stale": False}
+                        "series": _series, "stale": False}
             log.warning("VIX term structure: values out of range VIX=%s VIX3M=%s",
                         vix, v3)
         else:
@@ -622,6 +626,22 @@ def compute_vix_term_structure(cache):
                 "streak": int(cache.get("backwardation_streak") or 0),
                 "date": None, "stale": True}
     log.warning("VIX term structure: no data and no cache")
+    return None
+def compute_vix9d_ratio():
+    """VIX9D/VIX front-of-curve ratio (issue #17, keyless via Yahoo).
+    Returns (ratio, vix9d, vix, date) or None on any failure (fail-safe)."""
+    m9 = _yahoo_closes_dated("%5EVIX9D", "6mo")
+    mv = _yahoo_closes_dated("%5EVIX", "6mo")
+    if m9 and mv:
+        common = sorted(d for d in m9 if d in mv)
+        if common:
+            day = common[-1]
+            v9, vx = m9[day], mv[day]
+            if vx and 5 <= v9 <= 200 and 5 <= vx <= 150:
+                return v9 / vx, v9, vx, day
+            log.warning("VIX9D/VIX: values out of range v9=%s vix=%s", v9, vx)
+        else:
+            log.warning("VIX9D/VIX: no common date between ^VIX9D and ^VIX")
     return None
 def compute_breadth_proxy(cache):
     series = fetch_rsp_spy_ratio(120)
@@ -1094,6 +1114,39 @@ else:
         vix_ts_sub = "VIX/VIX3M ratio %.3f (last known)" % _cached_ratio
         vix_ts_col = "amber"
         log.warning("VIX term structure: using cache (%.3f)", _cached_ratio)
+# ---- VIX9D/VIX front-of-curve inversion (issue #17, keyless) --------------
+# 9-day implied vol above 30-day = stress showing at the FRONT of the curve,
+# the earliest term-structure tell. Fail-safe: off when ^VIX9D unavailable.
+vix9d_ratio = None
+vix9d_inversion = False
+_v9 = compute_vix9d_ratio()
+if _v9:
+    vix9d_ratio, _v9_px, _v9_vix, _v9_day = _v9
+    vix9d_inversion = vix9d_ratio >= 1.0
+    vix_ts_sub += " | VIX9D/VIX %.3f%s" % (
+        vix9d_ratio, " — FRONT-OF-CURVE INVERTED" if vix9d_inversion else "")
+    log.info("VIX9D/VIX: %.3f (9d %.2f / 30d %.2f, %s) -> inversion=%s",
+             vix9d_ratio, _v9_px, _v9_vix, _v9_day, vix9d_inversion)
+else:
+    log.warning("VIX9D/VIX: unavailable — signal off (fail-safe)")
+# ---- Term-structure VELOCITY: rate of flattening of VIX/VIX3M (issue #17) --
+# Not just the >1.0 cross: how FAST the curve is racing toward inversion.
+# PRE-ALERT input only (does not join the Layer-2 2-of-3 set). Fail-safe: off.
+TS_VELOCITY_THRESH = 0.08   # ratio points per 5 sessions
+TS_VELOCITY_FLOOR = 0.95    # only meaningful when already near inversion
+ts_velocity = None
+ts_accelerating = False
+_ts_series = (_vts or {}).get("series") or []
+if len(_ts_series) >= 6:
+    ts_velocity = _ts_series[-1] - _ts_series[-6]
+    ts_accelerating = (ts_velocity >= TS_VELOCITY_THRESH) and (
+        _ts_series[-1] >= TS_VELOCITY_FLOOR)
+    vix_ts_sub += " | flattening %+.3f/5d%s" % (
+        ts_velocity, " — ACCELERATING" if ts_accelerating else "")
+    log.info("TS velocity: %+.3f per 5 sessions (ratio %.3f) -> accelerating=%s",
+             ts_velocity, _ts_series[-1], ts_accelerating)
+else:
+    log.warning("TS velocity: insufficient ratio history — off (fail-safe)")
 # Layer-2 vol-regime signal: the paywalled GEX/dealer-gamma flip is replaced by
 # a keyless REALIZED-VOLATILITY EXPANSION measure (computed below, once SPY
 # history is available). Dealers short gamma amplify moves -> realized vol
@@ -1202,7 +1255,7 @@ if _spy_hist and len(_spy_hist) >= 26:
                  "ratio %.2f (fire >=1.30) = %s", rvol5, rvol20, _s5 / _s20, vol_expansion)
 else:
     log.warning("vol-expansion: insufficient SPY history — signal off (fail-safe)")
-gamma_flip = bool(_gex_manual or vol_expansion)
+gamma_flip = bool(_gex_manual or vol_expansion or vix9d_inversion)
 # ---- R:R GATE (2026-07-03): reward:risk must be >= 5.0, else WATCHING.
 #   entry  = current SPY price
 #   stop   = highest close of the last 5 sessions (floor: entry +0.5%)
@@ -1305,6 +1358,29 @@ if _bp is not None:
         breadth_proxy_divergence = True
         primary = primary + " | BREADTH DIVERGENCE (RSP/SPY) CONFIRMED"
         log.info("BREADTH DIVERGENCE (RSP/SPY) CONFIRMED: SPX near highs, ratio narrowing")
+# ---- PRE-ALERT early-warning composite (issue #17) -------------------------
+# Named state BELOW Layer 2: top-proximity divergence. Fires when breadth is
+# narrowing persistently near the highs AND at least one vol input is on.
+# Informational only — never gates INITIATE, never touches sizing.
+PRE_ALERT_MIN_STREAK = 3
+pre_alert = False
+pre_alert_inputs = []
+_pa_narrowing = bool(_bp is not None and not _bp.get("stale", False)
+                     and _bp["direction"] == "NARROWING"
+                     and _bp["streak"] >= PRE_ALERT_MIN_STREAK)
+if vix9d_inversion: pre_alert_inputs.append("VIX9D inversion")
+if ts_accelerating: pre_alert_inputs.append("TS flattening accel")
+if _vix_backwardation: pre_alert_inputs.append("VIX backwardation")
+if vol_expansion: pre_alert_inputs.append("vol expansion")
+if _pa_narrowing and pre_alert_inputs and bool(_spx_near_high):
+    pre_alert = True
+    log.info("PRE-ALERT fired: narrowing %d sessions + [%s] + SPX near high",
+             _bp["streak"], ", ".join(pre_alert_inputs))
+pre_alert_txt = ""
+if pre_alert:
+    pre_alert_txt = ("PRE-ALERT — EARLY WARNING (top-proximity divergence): "
+                     "RSP/SPY narrowing %d sessions + %s + SPX within 2%% of "
+                     "52wk high" % (_bp["streak"], ", ".join(pre_alert_inputs)))
 # NOTE 2026-07-03: the Layer-2 2-of-3 ENTRY-SIGNAL check moved into the
 # VERDICT ENGINE below (after the tiles are built) so its caveats reference
 # the FINAL primary verdict, not the pre-escalation placeholder.
@@ -1472,7 +1548,9 @@ _l2_signals = sum([gamma_flip, _vix_backwardation, mcclellan_divergence])
 _cal_clear = not any(x in cal_sub for x in ("in 0d", "in 1d", "in 2d"))
 if _l2_signals >= 2 and _cal_clear:
     _l2_names = []
-    if gamma_flip: _l2_names.append("vol expansion" if vol_expansion else "GEX flip (manual)")
+    if gamma_flip: _l2_names.append(
+        "vol expansion" if vol_expansion else
+        ("VIX9D inversion" if vix9d_inversion else "GEX flip (manual)"))
     if _vix_backwardation: _l2_names.append("VIX backwardation")
     if mcclellan_divergence: _l2_names.append("McClellan divergence")
     _why_low = []
@@ -1619,6 +1697,14 @@ def build_html():
         FONT, MUTED, FONT, TEXT, esc(primary or "n/a"),
         BORDER, FONT, MUTED, FONT, TEXT, esc(layer2 or "n/a"),
         FONT, MUTED, esc(gate_note))
+    if pre_alert:
+        out += ('<tr><td bgcolor="%s" style="background:%s;padding:0 16px 10px;'
+                'border-bottom:1px solid %s;">'
+                '<div style="background:#fff8c5;border:1px solid %s;'
+                'border-left:4px solid %s;padding:7px 10px;border-radius:4px;'
+                'font-family:%s;font-size:11px;font-weight:700;color:%s;">%s'
+                '</div></td></tr>') % (
+            CARD, CARD, BORDER, AMBER, AMBER, FONT, AMBER, esc(pre_alert_txt))
     out += ('<tr><td bgcolor="%s" style="background:%s;padding:7px 16px 3px;">'
             '<span style="font-family:%s;font-size:9px;font-weight:700;color:%s;'
             'text-transform:uppercase;letter-spacing:0.8px;">Indicators</span>'
@@ -1688,11 +1774,17 @@ def build_html():
                "FOMC within 2 days blocks INITIATE. The 10-day OpEx Structural Transition Window is flagged as CALENDAR GATE — TRANSITION WINDOW.")
         + ('<div style="%s">Layer-2 entry inputs &mdash; the 2-of-3 ENTRY SIGNAL set</div>' % _lg_hdr)
         + _lgm(AMBER, "VIX term structure (tile 17)",
-               "VIX / VIX3M. Backwardation = near-term fear &gt; forward fear, a stress tell. 1 of 3 entry inputs.")
+               "VIX / VIX3M. Backwardation = near-term fear > forward fear, a stress tell. 1 of 3 entry inputs.")
         + _lgm(AMBER, "McClellan / NYMO divergence (tile 14)",
                "NYMO negative WHILE SPX sits near its 52-week high = price/breadth divergence. 1 of 3 entry inputs.")
         + _lgm(AMBER, "Realized-vol expansion (Layer-2)",
-               "5-day realized vol accelerating &gt;=1.30x its 20-day baseline (from SPY closes, keyless) = vol-regime expansion — the tell the old GEX flip proxied. Manual GEX_FLIP=1 still forces it. 1 of 3 entry inputs.")
+               "5-day realized vol accelerating >=1.30x its 20-day baseline (from SPY closes, keyless) = vol-regime expansion — the tell the old GEX flip proxied. Manual GEX_FLIP=1 or a VIX9D/VIX front-of-curve inversion also lights this input. 1 of 3 entry inputs.")
+        + _lgm(AMBER, "VIX9D/VIX inversion (Layer-2)",
+               "9-day implied vol above 30-day (VIX9D/VIX >= 1.0) = stress at the FRONT of the curve, the earliest term-structure tell (Yahoo ^VIX9D, keyless). Feeds the same Layer-2 vol-regime input as vol expansion.")
+        + _lgm(AMBER, "Term-structure velocity (early warning)",
+               "5-session rate of change of VIX/VIX3M. Flattening >= +0.08/5d with the ratio already >= 0.95 = curve racing toward inversion. PRE-ALERT input only - not in the Layer-2 2-of-3 set.")
+        + _lgm(AMBER, "PRE-ALERT composite (early warning)",
+               "RSP/SPY narrowing >= 3 sessions + any one vol input (VIX9D inversion, TS velocity, backwardation, vol expansion) + SPX within 2% of its 52wk high. Named early-warning state below Layer 2 - informational only, never gates or sizes.")
         + ('<div style="%s">Breadth / divergence</div>' % _lg_hdr)
         + _lgm(GREEN, "Market breadth (tile 7)",
                "% of names advancing (FMP sectors, WSJ NYSE A/D fallback). Below 50% = one of the two dual-red triggers.")
@@ -1706,7 +1798,7 @@ def build_html():
         + _lgm(AMBER, "Signal-strength sizing",
                "8-11 red tiles = standard, 12-15 = 1.5x, 16-19 = 2x (cap). MAX CONVICTION requires Pt11 (sector rotation) AND Pt16 (AAII) both red.")
         + _lgm(AMBER, "Catalyst / post-loss flags",
-               "Catalyst auto-confirms when SPY prints a fresh 20-day low AND breakdown volume &gt;=1.2x (else size halves; CATALYST_ON=1 still forces it). Size halves again while POST_LOSS_DESIZE=1 after a 2% exit trigger.")
+               "Catalyst auto-confirms when SPY prints a fresh 20-day low AND breakdown volume >=1.2x (else size halves; CATALYST_ON=1 still forces it). Size halves again while POST_LOSS_DESIZE=1 after a 2% exit trigger.")
         + _lgm(AMBER, "Exit rule",
                "2% adverse within 3 sessions = full exit, no averaging down.")
         + ('<div style="%s">Informational / tally &mdash; context + colour count, not gating</div>' % _lg_hdr)
@@ -1734,9 +1826,11 @@ vix_card = ("%.1f" % vix_px) if vix_px is not None else "n/a"
 sp_card  = ("%+d bps" % spread_bps) if spread_bps is not None else "n/a"
 br_card  = ("%d%%" % breadth) if breadth is not None else "n/a"
 html = build_html()
-plain = ("MacroSage SHORT signal - %s\nPRIMARY VERDICT: %s\nLAYER 2 VERDICT: %s\n\n%s\n\n"
+plain = ("MacroSage SHORT signal - %s\nPRIMARY VERDICT: %s\nLAYER 2 VERDICT: %s\n%s\n%s\n\n"
          "%d of %d indicators retrieved. Research/educational only - not investment advice.\n"
-         % (now, primary, layer2, final_signal, TILES_WITH_DATA, TOTAL_TILES))
+         % (now, primary, layer2,
+            (pre_alert_txt + "\n") if pre_alert else "",
+            final_signal, TILES_WITH_DATA, TOTAL_TILES))
 try:
     rdir = os.path.join(HERE, "reports")
     os.makedirs(rdir, exist_ok=True)
