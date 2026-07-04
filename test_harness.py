@@ -275,5 +275,70 @@ check(">WATCHING<" in htmlK and ">INITIATE SHORT<" not in htmlK,
       "banner shows WATCHING on missing data, never the red pill")
 
 print("=" * 70)
+print("SCENARIO L: VIX9D/VIX front-of-curve inversion (issue #17)")
+print("=" * 70)
+gL1 = run_scenario("v9don", descending(520, 400.5, 251), 400.0,
+                   {"dual_red_streak": {"value": 3, "ts": "2026-07-01T00:00:00"}},
+                   extra=[("yahoo", "chart/%5EVIX9D?range=6mo",
+                           yahoo_daily([30.0] * 126))])
+check(gL1["vix9d_inversion"] is True, "inversion fires when VIX9D > VIX (%.3f)" % gL1["vix9d_ratio"])
+check(gL1["gamma_flip"] is True, "Layer-2 vol-regime input lights via VIX9D path")
+check("FRONT-OF-CURVE INVERTED" in gL1["vix_ts_sub"], "tile 17 flags the inversion")
+check(gL1["ts_accelerating"] is False, "TS velocity stays off on a stable ratio series")
+gL2 = run_scenario("v9doff", descending(520, 400.5, 251), 400.0,
+                   {"dual_red_streak": {"value": 3, "ts": "2026-07-01T00:00:00"}},
+                   extra=[("yahoo", "chart/%5EVIX9D?range=6mo",
+                           yahoo_daily([20.0] * 126))])
+check(gL2["vix9d_inversion"] is False, "no inversion when VIX9D < VIX (%.3f)" % gL2["vix9d_ratio"])
+check(gL2["gamma_flip"] is False, "vol-regime input off (no expansion, no inversion, no manual)")
+gL3 = run_scenario("v9dmiss", descending(520, 400.5, 251), 400.0,
+                   {"dual_red_streak": {"value": 3, "ts": "2026-07-01T00:00:00"}},
+                   extra=[("yahoo", "chart/%5EVIX9D?range=6mo", yahoo_daily([]))])
+check(gL3["vix9d_ratio"] is None, "ratio never fabricated when ^VIX9D missing (None)")
+check(gL3["vix9d_inversion"] is False, "inversion off fail-safe when ^VIX9D missing")
+
+print("=" * 70)
+print("SCENARIO M: term-structure VELOCITY - fast flattening (issue #17)")
+print("=" * 70)
+gM = run_scenario("tsvel", descending(520, 400.5, 251), 400.0,
+                  {"dual_red_streak": {"value": 3, "ts": "2026-07-01T00:00:00"}},
+                  extra=[("yahoo", "chart/%5EVIX?range=6mo",
+                          yahoo_daily([20.0] * 120 + [21.0, 23.0, 25.0, 27.0, 29.0])),
+                         ("yahoo", "chart/%5EVIX3M?range=6mo",
+                          yahoo_daily([25.0] * 125))])
+check(gM["ts_velocity"] is not None and gM["ts_velocity"] >= 0.08,
+      "velocity computed on a 5-session vol ramp (%+.3f)" % gM["ts_velocity"])
+check(gM["ts_accelerating"] is True, "ACCELERATING flag fires (fast flattening near inversion)")
+check("ACCELERATING" in gM["vix_ts_sub"], "tile 17 shows the flattening rate")
+
+print("=" * 70)
+print("SCENARIO N: PRE-ALERT composite - top-proximity divergence (issue #17)")
+print("=" * 70)
+_pa_seed = {"dual_red_streak": {"value": 3, "ts": "2026-07-01T00:00:00"},
+            "breadth_proxy_dir": {"value": "NARROWING", "ts": "2026-07-01T00:00:00"},
+            "breadth_proxy_streak": {"value": 3, "ts": "2026-07-01T00:00:00"}}
+gN = run_scenario("prealert", ascending(350, 500.5, 251), 500.0, dict(_pa_seed))
+check(gN["pre_alert"] is True, "PRE-ALERT fires: narrowing streak + backwardation + near 52wk high")
+check("PRE-ALERT" in gN["pre_alert_txt"] and "narrowing" in gN["pre_alert_txt"],
+      "pre-alert text names the legs: %s" % gN["pre_alert_txt"][:60])
+check(gN["initiate_short"] is False, "PRE-ALERT never gates: INITIATE still blocked (200DMA above)")
+htmlN = gN["build_html"]()
+check("PRE-ALERT" in htmlN, "amber PRE-ALERT strip rendered in email")
+check(">WATCHING<" in htmlN and ">INITIATE SHORT<" not in htmlN,
+      "banner stays WATCHING - PRE-ALERT never shows the red pill")
+check("PRE-ALERT" in gN["plain"], "plain-text email carries the PRE-ALERT line")
+gN2 = run_scenario("panohigh", descending(520, 400.5, 251), 400.0, dict(_pa_seed))
+check(gN2["pre_alert"] is False, "leg check: no PRE-ALERT away from the highs")
+gN3 = run_scenario("pashort", ascending(350, 500.5, 251), 500.0,
+                   {"dual_red_streak": {"value": 3, "ts": "2026-07-01T00:00:00"},
+                    "breadth_proxy_dir": {"value": "NARROWING", "ts": "2026-07-01T00:00:00"},
+                    "breadth_proxy_streak": {"value": 1, "ts": "2026-07-01T00:00:00"}})
+check(gN3["pre_alert"] is False, "leg check: narrowing streak < 3 blocks PRE-ALERT")
+gN4 = run_scenario("panovol", ascending(350, 500.5, 251), 500.0, dict(_pa_seed),
+                   extra=[("yahoo", "chart/%5EVIX?range=6mo",
+                           yahoo_daily(descending(20, 18, 126)))])
+check(gN4["pre_alert"] is False, "leg check: no vol input (contango, no expansion) blocks PRE-ALERT")
+
+print("=" * 70)
 print("RESULT: " + ("*** FAILURES ***" if FAILED else "ALL CHECKS PASSED"))
 sys.exit(1 if FAILED else 0)

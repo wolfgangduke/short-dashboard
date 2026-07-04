@@ -175,6 +175,12 @@ def get_scenario(name):
     S["missing_history"] = dict(
         closes=descending(470, 455, 25), spy_px=400.0, seed=STREAK3,
         expect="WATCHING: no daily history -> 200DMA/volume/R:R all UNKNOWN, fail CLOSED")
+    S["pre_alert"] = dict(
+        closes=ascending(350, 500.5, 251), spy_px=500.0,
+        seed={"dual_red_streak": {"value": 3, "ts": "2026-07-01T00:00:00"},
+              "breadth_proxy_dir": {"value": "NARROWING", "ts": "2026-07-01T00:00:00"},
+              "breadth_proxy_streak": {"value": 3, "ts": "2026-07-01T00:00:00"}},
+        expect="WATCHING + amber PRE-ALERT strip (narrowing near highs + vol input)")
     if name not in S:
         raise SystemExit("unknown scenario %r; use --list" % name)
     return S[name]
@@ -182,7 +188,7 @@ def get_scenario(name):
 SCENARIO_NAMES = ["full_escalation", "blocked_200dma", "blocked_streak",
                   "blocked_10m_ema", "blocked_volume", "blocked_rr",
                   "blocked_fomc", "missing_monthly", "missing_volume",
-                  "missing_history"]
+                  "missing_history", "pre_alert"]
 
 BANNER = ('<div style="background:#b91c1c;color:#ffffff;border:4px dashed #ffffff;'
           'outline:4px solid #b91c1c;text-align:center;padding:16px 10px;'
@@ -263,6 +269,8 @@ def main():
         g.get("spx_above_200dma"), g.get("spx_above_10mema")))
     print("catalyst_auto=%s  vol_expansion=%s" % (
         g.get("catalyst_auto"), g.get("vol_expansion")))
+    print("vix9d_ratio=%s  ts_velocity=%s  pre_alert=%s" % (
+        g.get("vix9d_ratio"), g.get("ts_velocity"), g.get("pre_alert")))
     print("-" * 70)
     print("rendered: %s" % out_path)
     print("SIMULATION DRILL - NOT A SIGNAL (no email sent, no state written)")
