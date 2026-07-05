@@ -1586,13 +1586,14 @@ def build_html():
     RED     = "#cf222e"
     GRAY    = "#6e7781"
     FONT    = "-apple-system,BlinkMacSystemFont,'Helvetica Neue',Arial,sans-serif"
+ STEEL   = "#4a7fb5"  # header wordmark - mid-tone steel-blue, legible in light mode and under Gmail's dark-mode inversion
     sig_color = {"green": GREEN, "amber": AMBER, "red": RED, "gray": GRAY}
     sig_label = {"green": "Bullish", "amber": "Watch", "red": "Bearish", "gray": "Neutral"}
     def esc(s):
         return str(s).replace("&","&amp;").replace("<","&lt;").replace(">","&gt;")
     pv = (primary or "").upper()
     if initiate_short:
-        b_txt, b_bg, b_fg, b_bdr = "INITIATE SHORT", "#ffebe9", RED, RED
+        b_txt, b_bg, b_fg, b_bdr = "CRASH ALERT", "#ffebe9", RED, RED
     elif "WATCH" in pv:
         b_txt, b_bg, b_fg, b_bdr = "WATCHING", "#fff8c5", AMBER, AMBER
     else:
@@ -1647,14 +1648,15 @@ def build_html():
             '<tr><td align="center" style="padding:20px 8px;">') % (PAGE, PAGE, PAGE)
     out += ('<table width="480" cellpadding="0" cellspacing="0" border="0"'
             ' bgcolor="%s" style="max-width:480px;width:100%%;background:%s;'
-            'border:1px solid %s;border-radius:10px;">') % (CARD2, CARD2, BORDER)
     out += ('<tr><td bgcolor="%s" style="background:%s;padding:13px 16px;'
             'border-radius:10px 10px 0 0;border-bottom:1px solid %s;">'
             '<table width="100%%" cellpadding="0" cellspacing="0" border="0"><tr>'
-            '<td style="font-family:%s;font-size:15px;font-weight:700;color:%s;">'
-            'MacroSage <span style="color:%s;">SHORT</span></td>'
+            '<td style="font-family:%s;">'
+            '<div style="font-size:15px;font-weight:700;letter-spacing:0.5px;color:%s;">MACROSAGE</div>'
+            '<div style="font-size:9px;font-weight:600;letter-spacing:0.5px;color:%s;margin-top:2px;">MARKET CRASH MONITOR</div>'
+            '</td>'
             '<td align="right" style="font-family:%s;font-size:10px;color:%s;">%s</td>'
-            '</tr></table></td></tr>') % (CARD, CARD, BORDER, FONT, TEXT, RED, FONT, MUTED, esc(today))
+            '</tr></table></td></tr>') % (CARD, CARD, BORDER, FONT, STEEL, MUTED, FONT, MUTED, esc(today))
     if stale_banner:
         out += f'<tr><td style="padding:0 16px 12px 16px;">{stale_banner}</td></tr>'
     out += ('<tr><td bgcolor="%s" style="background:%s;padding:11px 16px;'
@@ -1848,10 +1850,11 @@ def send_email():
     import glob as _glob
     from email.mime.base import MIMEBase
     from email import encoders as _encoders
-    # Subject leads with the live verdict so an INITIATE fire is visible
-    # from the inbox without opening the email.
-    _tag = "INITIATE SHORT" if initiate_short else "Watching"
-    subject = "SHORT Signal [%s] - %s Post-Market" % (_tag, today)
+    # Subject is neutral day-to-day; only an active CRASH ALERT escalates it,
+    # so a calm/WATCHING day never looks alarming from the inbox.
+    subject = "MacroSage — Daily Risk Report — %s" % today
+    if initiate_short:
+        subject = "⚠ CRASH ALERT — " + subject
     if IS_HOLIDAY:
         subject += " [US holiday]"
     _alt = MIMEMultipart("alternative")
