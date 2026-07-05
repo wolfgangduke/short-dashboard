@@ -1586,7 +1586,7 @@ def build_html():
     RED     = "#cf222e"
     GRAY    = "#6e7781"
     FONT    = "-apple-system,BlinkMacSystemFont,'Helvetica Neue',Arial,sans-serif"
- STEEL   = "#4a7fb5"  # header wordmark - mid-tone steel-blue, legible in light mode and under Gmail's dark-mode inversion
+    STEEL   = "#4a7fb5"  # header wordmark - mid-tone steel-blue, legible in light mode and under Gmail's dark-mode inversion
     sig_color = {"green": GREEN, "amber": AMBER, "red": RED, "gray": GRAY}
     sig_label = {"green": "Bullish", "amber": "Watch", "red": "Bearish", "gray": "Neutral"}
     def esc(s):
