@@ -1648,6 +1648,7 @@ def build_html():
             '<tr><td align="center" style="padding:20px 8px;">') % (PAGE, PAGE, PAGE)
     out += ('<table width="480" cellpadding="0" cellspacing="0" border="0"'
             ' bgcolor="%s" style="max-width:480px;width:100%%;background:%s;'
+            'border:1px solid %s;border-radius:10px;">') % (CARD2, CARD2, BORDER)
     out += ('<tr><td bgcolor="%s" style="background:%s;padding:13px 16px;'
             'border-radius:10px 10px 0 0;border-bottom:1px solid %s;">'
             '<table width="100%%" cellpadding="0" cellspacing="0" border="0"><tr>'
