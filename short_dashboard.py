@@ -1914,4 +1914,25 @@ if __name__ == "__main__":
     CACHE.save()
     log.info("Run complete - %d/%d signals retrieved, email sent: %s",
              TILES_WITH_DATA, TOTAL_TILES, "YES" if email_ok else "NO")
-    sys.exit(0)
+
+    # Dormant heartbeat ping (run-health-alerts). Off by default: only fires
+    # once HEALTHCHECK_URL is configured (see the PR description for the
+    # activation steps, which are NOT part of this change). Zero new
+    # dependencies - plain urllib, already imported above - and wrapped in
+    # try/except so a monitoring outage can never break the run.
+    _hc_url = cfg("HEALTHCHECK_URL")
+    if _hc_url:
+        try:
+            _hc_ping = _hc_url if email_ok else (_hc_url.rstrip("/") + "/fail")
+            urllib.request.urlopen(_hc_ping, timeout=10)
+            log.info("heartbeat ping sent: %s", "success" if email_ok else "fail")
+        except Exception as _hc_ex:
+            log.warning("heartbeat ping failed (non-fatal, run unaffected): %s", _hc_ex)
+
+    # Exit code reflects the EMAIL outcome, not just data availability: the
+    # graceful last-known-value fallback further up means a single dead data
+    # source never fails the run, but a failed send is the one failure mode
+    # this job exists to surface. Exit 1 on email failure so Actions marks
+    # the run red and fires its built-in failure notification instead of
+    # showing green on a run that never actually emailed anyone.
+    sys.exit(0 if email_ok else 1)
