@@ -781,7 +781,9 @@ for key, path in [
         D[key] = d[0] if isinstance(d, list) and d else d
     else:
         log.warning("FMP %s unavailable (%s)", key, e)
-sectors, e = fmp("sector-performance-snapshot?date=%s" % datetime.date.today().isoformat())
+# FIXED 2026-07-06: use ET_TODAY (US market day) not the runner's UTC date,
+# which could request the wrong calendar day near midnight UTC.
+sectors, e = fmp("sector-performance-snapshot?date=%s" % ET_TODAY.isoformat())
 if not sectors:
     sectors, e = fmp("sector-performance-snapshot")
 spy = D.get("spy", {}) if isinstance(D.get("spy"), dict) else {}
@@ -1005,12 +1007,15 @@ if _cot:
         am_net = amL - amS
         lev_chg = dL - dS
         src = _cot.get("_source", "CFTC")
+        # FIXED 2026-07-06: the Tradingster fallback has no week-over-week change
+        # field (hardcoded 0), so show "n/a" rather than a misleading "+0".
+        _lev_txt = "n/a" if src == "tradingster" else "%+.0f" % lev_chg
         if am_net > 0:
             cot_col = "green"
-            cot_sub = "AM net long %+.0f; Lev chg %+.0f [%s]" % (am_net, lev_chg, src)
+            cot_sub = "AM net long %+.0f; Lev chg %s [%s]" % (am_net, _lev_txt, src)
         else:
             cot_col = "red"
-            cot_sub = "AM net short %+.0f; Lev chg %+.0f [%s]" % (am_net, lev_chg, src)
+            cot_sub = "AM net short %+.0f; Lev chg %s [%s]" % (am_net, _lev_txt, src)
         CACHE.set("cot_sub", cot_sub, RUN_TS)
         CACHE.set("cot_col", cot_col, RUN_TS)
     except Exception as e:
@@ -1452,7 +1457,7 @@ log.info("tiles populated: %d/%d", TILES_WITH_DATA, TOTAL_TILES)
 #   4. applies the MacroSage sizing ladder + manual catalyst/post-loss flags
 # ===========================================================================
 n_red = sum(1 for _, _, c in p if c == "red")
-n_amber = sum(1 for _, _, c in p if c == "amber")
+n_amber = sum(1 for _, _, c in p if c == "amber")  # DEAD (flagged 2026-07-06): unused here; build_html recomputes its own. Kept per no-delete rule.
 tile11_red = p[10][2] == "red"   # Sector rotation (Pt11)
 tile16_red = p[15][2] == "red"   # AAII Sentiment  (Pt16)
 # ---- 1. dual-red streak (session-guarded, persisted) ----
@@ -1475,6 +1480,9 @@ _g_200 = spx_above_200dma is False          # SPX confirmed BELOW 200DMA
 _g_10m = spx_above_10mema is False          # SPX confirmed BELOW 10M EMA
 _g_vol = vol_ratio is not None and vol_ratio >= 1.2
 _g_rr = rr_value is not None and rr_value >= 5.0
+# NOTE 2026-07-06: FOMC gate is deliberately fail-OPEN. Unlike the data gates,
+# an empty calendar is the NORMAL result (no FOMC most weeks) = safe to trade.
+# Fail-closing here would let a flaky calendar API permanently suppress INITIATE.
 _g_fomc = not (fomc_days is not None and fomc_days <= 2)  # event-risk block
 blockers = []
 if not _g_streak:
@@ -1588,6 +1596,8 @@ def build_html():
     FONT    = "-apple-system,BlinkMacSystemFont,'Helvetica Neue',Arial,sans-serif"
     STEEL   = "#4a7fb5"  # header wordmark - mid-tone steel-blue, legible in light mode and under Gmail's dark-mode inversion
     sig_color = {"green": GREEN, "amber": AMBER, "red": RED, "gray": GRAY}
+    # DEAD (flagged 2026-07-06, kept per no-delete rule): sig_label is never
+    # read — the tile cards use colour only, not these text labels.
     sig_label = {"green": "Bullish", "amber": "Watch", "red": "Bearish", "gray": "Neutral"}
     def esc(s):
         return str(s).replace("&","&amp;").replace("<","&lt;").replace(">","&gt;")
