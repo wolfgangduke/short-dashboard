@@ -134,7 +134,7 @@ check(gA["primary"].startswith("INITIATE SHORT"), "primary starts with INITIATE 
 check("Size:" in gA["primary"], "sizing ladder present in verdict")
 check("Exit rule" in gA["primary"], "2% exit rule stated")
 html = gA["build_html"]()
-check(">INITIATE SHORT<" in html, "email banner shows INITIATE SHORT")
+check(">CRASH ALERT<" in html, "email banner shows CRASH ALERT (post-#21 red pill)")
 check(gA["vol_ratio"] is not None and gA["vol_ratio"] >= 1.2, "volume gate computed & passed (%.2fx)" % gA["vol_ratio"])
 check(gA["rr_value"] is not None and gA["rr_value"] >= 5.0, "R:R gate computed & passed (%.1f)" % gA["rr_value"])
 check(gA["spx_above_200dma"] is False, "SPX below 200DMA confirmed")
@@ -155,7 +155,7 @@ check("INITIATE blocked by" in gB["primary"], "blockers listed")
 check("SPX above 200DMA" in gB["primary"], "200DMA named as blocker")
 htmlB = gB["build_html"]()
 check(">WATCHING<" in htmlB, "email banner shows WATCHING")
-check(">INITIATE SHORT<" not in htmlB, "banner does NOT show INITIATE SHORT")
+check(">CRASH ALERT<" not in htmlB, "banner does NOT show the CRASH ALERT red pill")
 check(gB["catalyst_auto"] is False, "catalyst auto off at a fresh high (not a breakdown)")
 
 print("=" * 70)
@@ -164,7 +164,13 @@ print("=" * 70)
 gC = run_scenario("streak", descending(520, 400.5, 251), 400.0,
                   {"dual_red_streak": {"value": 1, "ts": "2026-07-01T00:00:00"}})
 check(gC["initiate_short"] is False, "initiate_short is False")
-check("dual-red streak 1/3" in gC["primary"], "streak blocker named: %s" % gC["primary"].split(" | ")[0])
+# Robust to the session guard: a streak seeded on a prior date legitimately
+# advances by one on a new trading session, so assert the blocker is NAMED and
+# still <3 rather than hardcoding the (date-sensitive) count.
+import re as _reC
+_mC = _reC.search(r"dual-red streak (\d+)/3", gC["primary"])
+check(bool(_mC) and int(_mC.group(1)) < 3,
+      "streak blocker named & <3: %s" % gC["primary"].split(" | ")[0])
 
 print("=" * 70)
 print("SCENARIO D: keyless replacements -> vol-expansion + catalyst auto-confirm")
@@ -191,8 +197,8 @@ check("INITIATE SHORT blocked" in gE["primary"],
       "primary carries the 'INITIATE SHORT blocked' gate note")
 htmlE = gE["build_html"]()
 check(">WATCHING<" in htmlE, "banner regression: renders WATCHING")
-check(">INITIATE SHORT<" not in htmlE,
-      "banner regression: red pill NOT shown despite 'INITIATE SHORT' in text")
+check(">CRASH ALERT<" not in htmlE,
+      "banner regression: red CRASH ALERT pill NOT shown despite 'INITIATE SHORT' in text")
 
 print("=" * 70)
 print("SCENARIO F: breakdown volume below 1.2x -> volume gate blocks")
@@ -271,7 +277,7 @@ check("volume unknown" in gK["primary"], "volume unknown named as blocker")
 check("200DMA gate unknown" in gK["primary"], "200DMA unknown named as blocker")
 check(gK["vol_expansion"] is False, "vol-expansion stays off without history")
 htmlK = gK["build_html"]()
-check(">WATCHING<" in htmlK and ">INITIATE SHORT<" not in htmlK,
+check(">WATCHING<" in htmlK and ">CRASH ALERT<" not in htmlK,
       "banner shows WATCHING on missing data, never the red pill")
 
 print("=" * 70)
@@ -324,7 +330,7 @@ check("PRE-ALERT" in gN["pre_alert_txt"] and "narrowing" in gN["pre_alert_txt"],
 check(gN["initiate_short"] is False, "PRE-ALERT never gates: INITIATE still blocked (200DMA above)")
 htmlN = gN["build_html"]()
 check("PRE-ALERT" in htmlN, "amber PRE-ALERT strip rendered in email")
-check(">WATCHING<" in htmlN and ">INITIATE SHORT<" not in htmlN,
+check(">WATCHING<" in htmlN and ">CRASH ALERT<" not in htmlN,
       "banner stays WATCHING - PRE-ALERT never shows the red pill")
 check("PRE-ALERT" in gN["plain"], "plain-text email carries the PRE-ALERT line")
 gN2 = run_scenario("panohigh", descending(520, 400.5, 251), 400.0, dict(_pa_seed))
