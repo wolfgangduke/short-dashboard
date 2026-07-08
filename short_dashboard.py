@@ -172,7 +172,7 @@ def http_get_json(url, headers=None, timeout=15, retries=3, backoff=1.0):
 # ---------------------------------------------------------------------------
 # Validation + cache fallback for scalar metrics
 # ---------------------------------------------------------------------------
-def keep(name, value, lo=None, hi=None):
+def keep(name, value, lo=None, hi=None, source="live"):
     """Validate a freshly-fetched scalar, cache it, or fall back to last-known.
     Returns (value, stale_flag). stale_flag is True when a cached value is used.
     """
@@ -188,7 +188,7 @@ def keep(name, value, lo=None, hi=None):
         value = None
     if value is not None:
         CACHE.set(name, value, RUN_TS)
-        log.info("metric %s = %.4g (live)", name, value)
+        log.info("metric %s = %.4g (%s)", name, value, source)
         return value, False
     cached = CACHE.get(name)
     if cached is not None:
@@ -202,6 +202,10 @@ def keep(name, value, lo=None, hi=None):
 # Data-source helpers
 # ---------------------------------------------------------------------------
 def fmp(path):
+    # TEST SEAM: force the FMP path to look dead so a workflow_dispatch run can
+    # exercise the free fallback tier on purpose. Off unless FMP_FORCE_FAIL is set.
+    if cfg("FMP_FORCE_FAIL") in ("1", "true", "True"):
+        return None, "forced-fail (test seam)"
     if not FMP:
         return None, "no FMP key"
     sep = "&" if "?" in path else "?"
@@ -232,6 +236,24 @@ def yahoo_closes(symbol, n=6):
         return vals or None
     except Exception:
         return None
+def _stooq_last_closes(symbol, n=2):
+    # Free Stooq daily CSV -> last n closes (oldest->newest). Fallback fetcher for
+    # the spot-quote tiles. Intentionally duplicates the nested _stooq_closes inside
+    # compute_breadth_proxy (kept separate on purpose; do not remove the nested one).
+    url = "https://stooq.com/q/d/l/?s=%s&i=d" % symbol
+    text, err = _http_get_text(url, timeout=20)
+    if not text or not text.strip().lower().startswith("date"):
+        log.warning("stooq %s: bad/empty response (%s)", symbol, err)
+        return None
+    closes = []
+    for row in text.strip().splitlines()[1:]:
+        parts = row.split(",")
+        if len(parts) >= 5:
+            try:
+                closes.append(float(parts[4]))
+            except (ValueError, IndexError):
+                pass
+    return closes[-n:] or None
 def cot_emini():
     url = ("https://publicreporting.cftc.gov/resource/gpe5-46if.json"
            "?$where=upper(contract_market_name)%20like%20'%25E-MINI%20S%26P%20500%25'"
@@ -787,16 +809,61 @@ sectors, e = fmp("sector-performance-snapshot?date=%s" % ET_TODAY.isoformat())
 if not sectors:
     sectors, e = fmp("sector-performance-snapshot")
 spy = D.get("spy", {}) if isinstance(D.get("spy"), dict) else {}
-spy_px, _ = keep("spy_px", num(spy.get("price")), 50, 2000)
-spy_chg, _ = keep("spy_chg", num(spy.get("changePercentage")), -25, 25)
+# --- spy_px / spy_chg: FMP primary -> Yahoo -> Stooq (free fallbacks) ---
+spy_px_v = num(spy.get("price"))
+spy_chg_v = num(spy.get("changePercentage"))
+spy_src = "live"
+if spy_px_v is None:
+    yc = yahoo_closes("SPY", 2)
+    if yc and len(yc) >= 2 and yc[-2]:
+        spy_px_v, spy_chg_v = yc[-1], (yc[-1] / yc[-2] - 1) * 100
+        spy_src = "fallback:yahoo"
+    else:
+        sc = _stooq_last_closes("spy.us", 2)
+        if sc and len(sc) >= 2 and sc[-2]:
+            spy_px_v, spy_chg_v = sc[-1], (sc[-1] / sc[-2] - 1) * 100
+            spy_src = "fallback:stooq"
+spy_px, _ = keep("spy_px", spy_px_v, 50, 2000, source=spy_src)
+spy_chg, _ = keep("spy_chg", spy_chg_v, -25, 25, source=spy_src)
 spx_proxy = spy_px * 10 if spy_px is not None else None
-vix_px, _ = keep("vix_px", num(D.get("vix", {}).get("price")
-                               if isinstance(D.get("vix"), dict) else None), 5, 150)
-gold_px, _ = keep("gold_px", num(D.get("gold", {}).get("price")
-                                 if isinstance(D.get("gold"), dict) else None), 200, 10000)
+# --- vix_px: FMP primary -> Yahoo -> Stooq (price only) ---
+vix_px_v = num(D.get("vix", {}).get("price") if isinstance(D.get("vix"), dict) else None)
+vix_src = "live"
+if vix_px_v is None:
+    yv = yahoo_closes("^VIX", 1)
+    if yv:
+        vix_px_v, vix_src = yv[-1], "fallback:yahoo"
+    else:
+        sv = _stooq_last_closes("^vix", 1)
+        if sv:
+            vix_px_v, vix_src = sv[-1], "fallback:stooq"
+vix_px, _ = keep("vix_px", vix_px_v, 5, 150, source=vix_src)
+# --- gold_px: FMP primary -> Yahoo -> Stooq ---
+gold_px_v = num(D.get("gold", {}).get("price") if isinstance(D.get("gold"), dict) else None)
+gold_src = "live"
+if gold_px_v is None:
+    yg = yahoo_closes("GC=F", 1)
+    if yg:
+        gold_px_v, gold_src = yg[-1], "fallback:yahoo"
+    else:
+        sg = _stooq_last_closes("xauusd", 1)
+        if sg:
+            gold_px_v, gold_src = sg[-1], "fallback:stooq"
+gold_px, _ = keep("gold_px", gold_px_v, 200, 10000, source=gold_src)
+# --- y2 / y10: FMP primary -> FRED (DGS2 / DGS10) ---
 t = D.get("treasury", {}) if isinstance(D.get("treasury"), dict) else {}
-y2, _ = keep("y2", num(t.get("year2")), -2, 25)
-y10, _ = keep("y10", num(t.get("year10")), -2, 25)
+y2_v, y2_src = num(t.get("year2")), "live"
+if y2_v is None:
+    f2 = fred_series("DGS2", 1)
+    if f2:
+        y2_v, y2_src = f2[0], "fallback:FRED"
+y2, _ = keep("y2", y2_v, -2, 25, source=y2_src)
+y10_v, y10_src = num(t.get("year10")), "live"
+if y10_v is None:
+    f10 = fred_series("DGS10", 1)
+    if f10:
+        y10_v, y10_src = f10[0], "fallback:FRED"
+y10, _ = keep("y10", y10_v, -2, 25, source=y10_src)
 spread_bps = round((y10 - y2) * 100) if (y2 is not None and y10 is not None) else None
 def sector_chg(s):
     for f in ("changesPercentage", "averageChange", "changePercentage", "changePct"):
@@ -1572,6 +1639,19 @@ if _l2_signals >= 2 and _cal_clear:
         ", ".join(_l2_names),
         ("; caveat: " + "; ".join(_why_low)) if _why_low else ""))
     log.info("Layer2 ENTRY signal fired: %s", layer2)
+# ---- Plain-English "what to do" summary (deterministic; reads existing verdict vars only) ----
+_ll = (layer2 or "")
+if initiate_short:
+    layman = ("Green light for a short (a bet the market falls). The trend has rolled over and the warning gauges agree, so the math says this is the setup to act on. Follow the size and exit rules in the verdict above.")
+elif _ll.startswith("ENTRY SIGNAL"):
+    layman = ("Small starter position. A couple of early-warning gauges have flipped while the trend is still up, so the math supports a tiny starter short (a small bet the market falls) only. Keep it small; this is not the full signal yet.")
+elif primary and "WATCHING" in primary.upper():
+    _t = (" The market is still in an uptrend, trading above its 200-day average (the long-term trend line), so the math says stay out for now." if spx_above_200dma is True else " The trend has not clearly rolled over yet, so the math says wait.")
+    _d = ((" Breadth has been weakening for %d day(s), so keep half an eye on it." % dual_red_streak) if dual_red_streak > 0 else "")
+    layman = ("Sit tight - no short (a bet the market falls) here." + _t + _d + " There is nothing to do today.")
+else:
+    layman = ("No clear read today. The dashboard did not produce a confident stance, so the safe move is to do nothing and wait for the next update.")
+log.info("Plain-English summary: %s", layman)
 now = eastern_now().strftime("%Y-%m-%d %H:%M ET")
 today = ET_TODAY.strftime("%B %d, %Y")
 stale_banner = ""
@@ -1706,12 +1786,14 @@ def build_html():
             '<div style="font-family:%s;font-size:11px;color:%s;line-height:1.35;">%s</div>'
             '</td></tr>'
             '<tr><td colspan="2" style="padding-top:5px;">'
+            '<div style="font-family:%s;font-size:12px;color:%s;line-height:1.45;font-weight:600;margin-bottom:4px;">%s</div>'
             '<div style="font-family:%s;font-size:9px;color:%s;font-style:italic;">%s</div>'
             '</td></tr></table></td></tr>') % (
         CARD, CARD, BORDER,
         FONT, MUTED, FONT, TEXT, esc(primary or "n/a"),
         BORDER, FONT, MUTED, FONT, TEXT, esc(layer2 or "n/a"),
-        FONT, MUTED, esc(gate_note))
+        FONT, TEXT, esc(layman),
+            FONT, MUTED, esc(gate_note))
     if pre_alert:
         out += ('<tr><td bgcolor="%s" style="background:%s;padding:0 16px 10px;'
                 'border-bottom:1px solid %s;">'
@@ -1841,9 +1923,9 @@ vix_card = ("%.1f" % vix_px) if vix_px is not None else "n/a"
 sp_card  = ("%+d bps" % spread_bps) if spread_bps is not None else "n/a"
 br_card  = ("%d%%" % breadth) if breadth is not None else "n/a"
 html = build_html()
-plain = ("MacroSage SHORT signal - %s\nPRIMARY VERDICT: %s\nLAYER 2 VERDICT: %s\n%s\n%s\n\n"
+plain = ("MacroSage SHORT signal - %s\nPRIMARY VERDICT: %s\nLAYER 2 VERDICT: %s\nWHAT TO DO: %s\n%s\n%s\n\n"
          "%d of %d indicators retrieved. Research/educational only - not investment advice.\n"
-         % (now, primary, layer2,
+         % (now, primary, layer2, layman,
             (pre_alert_txt + "\n") if pre_alert else "",
             final_signal, TILES_WITH_DATA, TOTAL_TILES))
 try:
