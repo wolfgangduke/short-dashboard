@@ -172,7 +172,7 @@ def http_get_json(url, headers=None, timeout=15, retries=3, backoff=1.0):
 # ---------------------------------------------------------------------------
 # Validation + cache fallback for scalar metrics
 # ---------------------------------------------------------------------------
-def keep(name, value, lo=None, hi=None):
+def keep(name, value, lo=None, hi=None, source="live"):
     """Validate a freshly-fetched scalar, cache it, or fall back to last-known.
     Returns (value, stale_flag). stale_flag is True when a cached value is used.
     """
@@ -188,7 +188,7 @@ def keep(name, value, lo=None, hi=None):
         value = None
     if value is not None:
         CACHE.set(name, value, RUN_TS)
-        log.info("metric %s = %.4g (live)", name, value)
+        log.info("metric %s = %.4g (%s)", name, value, source)
         return value, False
     cached = CACHE.get(name)
     if cached is not None:
@@ -202,6 +202,10 @@ def keep(name, value, lo=None, hi=None):
 # Data-source helpers
 # ---------------------------------------------------------------------------
 def fmp(path):
+    # TEST SEAM: force the FMP path to look dead so a workflow_dispatch run can
+    # exercise the free fallback tier on purpose. Off unless FMP_FORCE_FAIL is set.
+    if cfg("FMP_FORCE_FAIL") in ("1", "true", "True"):
+        return None, "forced-fail (test seam)"
     if not FMP:
         return None, "no FMP key"
     sep = "&" if "?" in path else "?"
@@ -232,6 +236,24 @@ def yahoo_closes(symbol, n=6):
         return vals or None
     except Exception:
         return None
+def _stooq_last_closes(symbol, n=2):
+    # Free Stooq daily CSV -> last n closes (oldest->newest). Fallback fetcher for
+    # the spot-quote tiles. Intentionally duplicates the nested _stooq_closes inside
+    # compute_breadth_proxy (kept separate on purpose; do not remove the nested one).
+    url = "https://stooq.com/q/d/l/?s=%s&i=d" % symbol
+    text, err = _http_get_text(url, timeout=20)
+    if not text or not text.strip().lower().startswith("date"):
+        log.warning("stooq %s: bad/empty response (%s)", symbol, err)
+        return None
+    closes = []
+    for row in text.strip().splitlines()[1:]:
+        parts = row.split(",")
+        if len(parts) >= 5:
+            try:
+                closes.append(float(parts[4]))
+            except (ValueError, IndexError):
+                pass
+    return closes[-n:] or None
 def cot_emini():
     url = ("https://publicreporting.cftc.gov/resource/gpe5-46if.json"
            "?$where=upper(contract_market_name)%20like%20'%25E-MINI%20S%26P%20500%25'"
@@ -787,16 +809,61 @@ sectors, e = fmp("sector-performance-snapshot?date=%s" % ET_TODAY.isoformat())
 if not sectors:
     sectors, e = fmp("sector-performance-snapshot")
 spy = D.get("spy", {}) if isinstance(D.get("spy"), dict) else {}
-spy_px, _ = keep("spy_px", num(spy.get("price")), 50, 2000)
-spy_chg, _ = keep("spy_chg", num(spy.get("changePercentage")), -25, 25)
+# --- spy_px / spy_chg: FMP primary -> Yahoo -> Stooq (free fallbacks) ---
+spy_px_v = num(spy.get("price"))
+spy_chg_v = num(spy.get("changePercentage"))
+spy_src = "live"
+if spy_px_v is None:
+    yc = yahoo_closes("SPY", 2)
+    if yc and len(yc) >= 2 and yc[-2]:
+        spy_px_v, spy_chg_v = yc[-1], (yc[-1] / yc[-2] - 1) * 100
+        spy_src = "fallback:yahoo"
+    else:
+        sc = _stooq_last_closes("spy.us", 2)
+        if sc and len(sc) >= 2 and sc[-2]:
+            spy_px_v, spy_chg_v = sc[-1], (sc[-1] / sc[-2] - 1) * 100
+            spy_src = "fallback:stooq"
+spy_px, _ = keep("spy_px", spy_px_v, 50, 2000, source=spy_src)
+spy_chg, _ = keep("spy_chg", spy_chg_v, -25, 25, source=spy_src)
 spx_proxy = spy_px * 10 if spy_px is not None else None
-vix_px, _ = keep("vix_px", num(D.get("vix", {}).get("price")
-                               if isinstance(D.get("vix"), dict) else None), 5, 150)
-gold_px, _ = keep("gold_px", num(D.get("gold", {}).get("price")
-                                 if isinstance(D.get("gold"), dict) else None), 200, 10000)
+# --- vix_px: FMP primary -> Yahoo -> Stooq (price only) ---
+vix_px_v = num(D.get("vix", {}).get("price") if isinstance(D.get("vix"), dict) else None)
+vix_src = "live"
+if vix_px_v is None:
+    yv = yahoo_closes("^VIX", 1)
+    if yv:
+        vix_px_v, vix_src = yv[-1], "fallback:yahoo"
+    else:
+        sv = _stooq_last_closes("^vix", 1)
+        if sv:
+            vix_px_v, vix_src = sv[-1], "fallback:stooq"
+vix_px, _ = keep("vix_px", vix_px_v, 5, 150, source=vix_src)
+# --- gold_px: FMP primary -> Yahoo -> Stooq ---
+gold_px_v = num(D.get("gold", {}).get("price") if isinstance(D.get("gold"), dict) else None)
+gold_src = "live"
+if gold_px_v is None:
+    yg = yahoo_closes("GC=F", 1)
+    if yg:
+        gold_px_v, gold_src = yg[-1], "fallback:yahoo"
+    else:
+        sg = _stooq_last_closes("xauusd", 1)
+        if sg:
+            gold_px_v, gold_src = sg[-1], "fallback:stooq"
+gold_px, _ = keep("gold_px", gold_px_v, 200, 10000, source=gold_src)
+# --- y2 / y10: FMP primary -> FRED (DGS2 / DGS10) ---
 t = D.get("treasury", {}) if isinstance(D.get("treasury"), dict) else {}
-y2, _ = keep("y2", num(t.get("year2")), -2, 25)
-y10, _ = keep("y10", num(t.get("year10")), -2, 25)
+y2_v, y2_src = num(t.get("year2")), "live"
+if y2_v is None:
+    f2 = fred_series("DGS2", 1)
+    if f2:
+        y2_v, y2_src = f2[0], "fallback:FRED"
+y2, _ = keep("y2", y2_v, -2, 25, source=y2_src)
+y10_v, y10_src = num(t.get("year10")), "live"
+if y10_v is None:
+    f10 = fred_series("DGS10", 1)
+    if f10:
+        y10_v, y10_src = f10[0], "fallback:FRED"
+y10, _ = keep("y10", y10_v, -2, 25, source=y10_src)
 spread_bps = round((y10 - y2) * 100) if (y2 is not None and y10 is not None) else None
 def sector_chg(s):
     for f in ("changesPercentage", "averageChange", "changePercentage", "changePct"):
