@@ -1637,6 +1637,19 @@ if _l2_signals >= 2 and _cal_clear:
         ", ".join(_l2_names),
         ("; caveat: " + "; ".join(_why_low)) if _why_low else ""))
     log.info("Layer2 ENTRY signal fired: %s", layer2)
+# ---- Plain-English "what to do" summary (deterministic; reads existing verdict vars only) ----
+_ll = (layer2 or "")
+if initiate_short:
+    layman = ("Green light for a short (a bet the market falls). The trend has rolled over and the warning gauges agree, so the math says this is the setup to act on. Follow the size and exit rules in the verdict above.")
+elif _ll.startswith("ENTRY SIGNAL"):
+    layman = ("Small starter position. A couple of early-warning gauges have flipped while the trend is still up, so the math supports a tiny starter short (a small bet the market falls) only. Keep it small; this is not the full signal yet.")
+elif primary and "WATCHING" in primary.upper():
+    _t = (" The market is still in an uptrend, trading above its 200-day average (the long-term trend line), so the math says stay out for now." if spx_above_200dma is True else " The trend has not clearly rolled over yet, so the math says wait.")
+    _d = ((" Breadth has been weakening for %d day(s), so keep half an eye on it." % dual_red_streak) if dual_red_streak > 0 else "")
+    layman = ("Sit tight - no short (a bet the market falls) here." + _t + _d + " There is nothing to do today.")
+else:
+    layman = ("No clear read today. The dashboard did not produce a confident stance, so the safe move is to do nothing and wait for the next update.")
+log.info("Plain-English summary: %s", layman)
 now = eastern_now().strftime("%Y-%m-%d %H:%M ET")
 today = ET_TODAY.strftime("%B %d, %Y")
 stale_banner = ""
@@ -1771,12 +1784,14 @@ def build_html():
             '<div style="font-family:%s;font-size:11px;color:%s;line-height:1.35;">%s</div>'
             '</td></tr>'
             '<tr><td colspan="2" style="padding-top:5px;">'
+            '<div style="font-family:%s;font-size:12px;color:%s;line-height:1.45;font-weight:600;margin-bottom:4px;">%s</div>'
             '<div style="font-family:%s;font-size:9px;color:%s;font-style:italic;">%s</div>'
             '</td></tr></table></td></tr>') % (
         CARD, CARD, BORDER,
         FONT, MUTED, FONT, TEXT, esc(primary or "n/a"),
         BORDER, FONT, MUTED, FONT, TEXT, esc(layer2 or "n/a"),
-        FONT, MUTED, esc(gate_note))
+        FONT, TEXT, esc(layman),
+            FONT, MUTED, esc(gate_note))
     if pre_alert:
         out += ('<tr><td bgcolor="%s" style="background:%s;padding:0 16px 10px;'
                 'border-bottom:1px solid %s;">'
@@ -1906,9 +1921,9 @@ vix_card = ("%.1f" % vix_px) if vix_px is not None else "n/a"
 sp_card  = ("%+d bps" % spread_bps) if spread_bps is not None else "n/a"
 br_card  = ("%d%%" % breadth) if breadth is not None else "n/a"
 html = build_html()
-plain = ("MacroSage SHORT signal - %s\nPRIMARY VERDICT: %s\nLAYER 2 VERDICT: %s\n%s\n%s\n\n"
+plain = ("MacroSage SHORT signal - %s\nPRIMARY VERDICT: %s\nLAYER 2 VERDICT: %s\nWHAT TO DO: %s\n%s\n%s\n\n"
          "%d of %d indicators retrieved. Research/educational only - not investment advice.\n"
-         % (now, primary, layer2,
+         % (now, primary, layer2, layman,
             (pre_alert_txt + "\n") if pre_alert else "",
             final_signal, TILES_WITH_DATA, TOTAL_TILES))
 try:
