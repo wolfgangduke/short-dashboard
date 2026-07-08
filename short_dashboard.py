@@ -1063,6 +1063,7 @@ if _cot and "report_date_as_yyyy_mm_dd" in _cot:
 if not _cot and not _cot_stale:
     log.info("COT CFTC returned no data; trying Tradingster fallback")
     _cot = fetch_cot_tradingster()
+log.info("COT status: %s" % ("UNAVAILABLE (CFTC empty/stale + Tradingster failed) -> last-known cache" if not _cot else "STALE-FALLBACK (CFTC >10d old; Tradingster live)" if _cot_stale else "LIVE (CFTC)" if "report_date_as_yyyy_mm_dd" in _cot else "LIVE (Tradingster; CFTC empty)"))
 if _cot:
     try:
         amL = float(_cot["asset_mgr_positions_long"])
@@ -1328,6 +1329,7 @@ if _spy_hist and len(_spy_hist) >= 26:
 else:
     log.warning("vol-expansion: insufficient SPY history — signal off (fail-safe)")
 gamma_flip = bool(_gex_manual or vol_expansion or vix9d_inversion)
+log.info("GEX status: %s | source https://spotgamma.com/free-tools/spx-gamma-exposure/ (JS/Cloudflare-walled, not live-scraped) | next-due: set GEX_FLIP=1 when net GEX flips negative" % ("MANUAL (GEX_FLIP override)" if _gex_manual else "proxy=realized-vol expansion" if vol_expansion else "proxy=VIX9D inversion" if vix9d_inversion else "OFF (manual GEX_FLIP available)"))
 # ---- R:R GATE (2026-07-03): reward:risk must be >= 5.0, else WATCHING.
 #   entry  = current SPY price
 #   stop   = highest close of the last 5 sessions (floor: entry +0.5%)
