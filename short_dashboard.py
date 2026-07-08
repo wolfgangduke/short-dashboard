@@ -1929,6 +1929,58 @@ def build_html():
     out += '</td></tr></table>'
     out += '</body></html>'
     return out
+# ---- Signal ledger (feature #1, 2026-07-08): persistent track record --------
+# Appends one row per trading day (verdict + SPY + gate flags) into state.json —
+# it rides along with the existing cache, so NO workflow change is needed — then
+# backfills 5/10/20-trading-day forward SPY returns onto older rows. Fully
+# fail-safe: any error here is logged and never breaks the run or the email.
+try:
+    if initiate_short:
+        _sig_state = "CRASH ALERT"
+    elif (layer2 or "").startswith("ENTRY SIGNAL"):
+        _sig_state = "ENTRY"
+    elif primary and "WATCHING" in primary.upper():
+        _sig_state = "WATCHING"
+    else:
+        _sig_state = "STAND DOWN"
+    _ledger = CACHE.get("signal_ledger") or []
+    _today_iso = ET_TODAY.isoformat()
+    _already = bool(_ledger and _ledger[-1].get("date") == _today_iso)
+    if (not _already) and not (IS_WEEKEND or IS_HOLIDAY) and spy_px is not None:
+        _ledger.append({
+            "date": _today_iso, "spy": round(spy_px, 2), "state": _sig_state,
+            "initiate": bool(initiate_short), "n_red": int(n_red),
+            "dual_red_streak": int(dual_red_streak),
+            "above_200dma": spx_above_200dma, "above_10mema": spx_above_10mema,
+            "ret5": None, "ret10": None, "ret20": None,
+        })
+        log.info("signal ledger: appended %s (%s, SPY %.2f)", _today_iso, _sig_state, spy_px)
+    # backfill forward returns from a dated SPY history (memoized fetch)
+    _sd = _yahoo_closes_dated("SPY", "1y") or {}
+    if _sd:
+        _days = sorted(_sd)                      # trading days ascending
+        _idx = {d: i for i, d in enumerate(_days)}
+        for _row in _ledger:
+            _si = _idx.get(_row.get("date"))
+            if _si is None:
+                continue
+            _base = _sd[_days[_si]]
+            for _h in (5, 10, 20):
+                _k = "ret%d" % _h
+                if _row.get(_k) is None and _si + _h < len(_days) and _base:
+                    _row[_k] = round((_sd[_days[_si + _h]] / _base - 1) * 100, 2)
+    _ledger = _ledger[-500:]                      # cap growth (~2yr trading days)
+    CACHE.set("signal_ledger", _ledger, RUN_TS)
+    # hit-rate summary: fired = ENTRY/CRASH ALERT; a "hit" = SPY fell over 20d
+    _fired = [r for r in _ledger if r.get("state") in ("ENTRY", "CRASH ALERT")]
+    _fired_closed = [r for r in _fired if r.get("ret20") is not None]
+    _fired_hit = [r for r in _fired_closed if r["ret20"] < 0]
+    _hr = ("%.0f%%" % (100.0 * len(_fired_hit) / len(_fired_closed))) if _fired_closed else "n/a"
+    log.info("signal ledger: %d rows | fired(ENTRY/CRASH) %d | closed-20d %d | fell-20d %d -> hit rate %s",
+             len(_ledger), len(_fired), len(_fired_closed), len(_fired_hit), _hr)
+except Exception as _lex:
+    log.warning("signal ledger: skipped (%s)", _lex)
+# -----------------------------------------------------------------------------
 final_signal = primary or "No verdict"
 spx_card = fmt_money(spx_proxy) if spx_proxy else "n/a"
 vix_card = ("%.1f" % vix_px) if vix_px is not None else "n/a"
