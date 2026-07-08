@@ -115,12 +115,33 @@ def mean(xs):
 HZ = (5, 10, 20)
 
 
-def build_rows(data):
+def realized_vol_flags(closes):
+    """vol_exp[i] = True when 5d realized vol >= 1.30x the 20d realized vol
+    (RMS of daily returns), matching the live engine's vol-expansion input."""
+    rets = [None] * len(closes)
+    for i in range(1, len(closes)):
+        if closes[i - 1]:
+            rets[i] = closes[i] / closes[i - 1] - 1.0
+
+    def rms(xs):
+        xs = [x for x in xs if x is not None]
+        return (sum(x * x for x in xs) / len(xs)) ** 0.5 if xs else None
+
+    out = [False] * len(closes)
+    for i in range(len(closes)):
+        if i >= 20:
+            r5, r20 = rms(rets[i - 4:i + 1]), rms(rets[i - 19:i + 1])
+            out[i] = bool(r5 is not None and r20 and r5 / r20 >= 1.30)
+    return out
+
+
+def build_rows(data, vix_map=None, v3_map=None):
     dates = [d for d, _ in data]
     closes = [c for _, c in data]
     n = len(closes)
     ema_m = month_end_ema(dates, closes, 10)
-    rows = []  # (date, below200, below10m, {h: fwd_ret%})
+    volx = realized_vol_flags(closes)
+    rows = []
     for i in range(n):
         if i < 200:
             continue
@@ -128,28 +149,30 @@ def build_rows(data):
         below200 = closes[i] < sma200
         e = ema_m.get(dates[i][:7])
         below10m = (e is not None and closes[i] < e)
+        vx = (vix_map or {}).get(dates[i])
+        v3 = (v3_map or {}).get(dates[i])
+        backw = bool(vx and v3 and vx / v3 >= 1.0)
         fwd = {}
         for h in HZ:
             if i + h < n:
                 fwd[h] = (closes[i + h] / closes[i] - 1) * 100
         if fwd:
-            rows.append((dates[i], below200, below10m, fwd))
+            rows.append({"date": dates[i], "below200": below200,
+                         "below10m": below10m, "backw": backw,
+                         "volx": volx[i], "have_vix": bool(vx and v3), "fwd": fwd})
     return rows
 
 
 def summarize(rows, name, sel):
-    print("\n=== %s ===" % name)
     for h in HZ:
-        base = [r[3][h] for r in rows if h in r[3]]
-        on = [r[3][h] for r in rows if sel(r) and h in r[3]]
+        base = [r["fwd"][h] for r in rows if h in r["fwd"]]
+        on = [r["fwd"][h] for r in rows if sel(r) and h in r["fwd"]]
         if not on:
-            print("  %2dd: (no qualifying days)" % h)
+            print("  %-46s %2dd: (no qualifying days)" % (name if h == HZ[0] else "", h))
             continue
-        print("  %2dd fwd | ON: n=%4d mean=%+.2f%% neg=%4.1f%%  |  base: "
-              "n=%5d mean=%+.2f%% neg=%4.1f%%  |  edge=%+.2f%%"
-              % (h, len(on), mean(on), pct(on, lambda x: x < 0),
-                 len(base), mean(base), pct(base, lambda x: x < 0),
-                 mean(on) - mean(base)))
+        print("  %-46s %2dd | ON n=%4d mean=%+.2f%% neg=%4.1f%% | base mean=%+.2f%% neg=%4.1f%% | edge=%+.2f%%"
+              % (name if h == HZ[0] else "", h, len(on), mean(on), pct(on, lambda x: x < 0),
+                 mean(base), pct(base, lambda x: x < 0), mean(on) - mean(base)))
 
 
 def episodes(rows, sel):
@@ -163,25 +186,49 @@ def episodes(rows, sel):
     return eps, starts
 
 
-def run():
-    rows = build_rows(load_spy())
-    neg20 = pct([r[3][20] for r in rows if 20 in r[3]], lambda x: x < 0)
-    print("\nWindow: %s .. %s (%d eligible days)" % (rows[0][0], rows[-1][0], len(rows)))
-    print("Base rate: SPY 20d-forward negative %.1f%% of all days" % neg20)
-    summarize(rows, "Variant A - SPX below 200DMA", lambda r: r[1])
-    summarize(rows, "Variant B - below 200DMA AND below 10M-EMA (live INITIATE regime)",
-              lambda r: r[1] and r[2])
-    epsB, starts = episodes(rows, lambda r: r[1] and r[2])
-    e20 = [s[3][20] for s in starts if 20 in s[3]]
+def entry_line(rows, name, sel):
+    eps, starts = episodes(rows, sel)
+    e20 = [s["fwd"][20] for s in starts if 20 in s["fwd"]]
     hit = [x for x in e20 if x < 0]
-    print("\nEpisodes (Variant B): %d distinct regime entries." % epsB)
     if e20:
-        print("  On regime ENTRY day, forward 20d SPY: mean=%+.2f%%, fell %d/%d (%.0f%%)"
-              % (mean(e20), len(hit), len(e20), 100.0 * len(hit) / len(e20)))
-    print("\nNOTE: trend-regime CORE only (200DMA + 10M-EMA). The live engine adds "
-          "sentiment gates (dual-red breadth+liquidity, volume, R:R, VIX term\n"
-          "structure) that further restrict firing; this is the reconstructable "
-          "backbone, not the full 18-tile signal.")
+        print("  %-34s %2d entries | entry+20d mean=%+.2f%% | fell %d/%d (%.0f%%)"
+              % (name, eps, mean(e20), len(hit), len(e20), 100.0 * len(hit) / len(e20)))
+    else:
+        print("  %-34s %2d entries | (no closed 20d outcomes)" % (name, eps))
+
+
+def run():
+    data = load_spy()
+    vix = yahoo_daily("%5EVIX", "10y") or []
+    v3 = yahoo_daily("%5EVIX3M", "10y") or []
+    vix_map = {d: c for d, c in vix}
+    v3_map = {d: c for d, c in v3}
+    rows = build_rows(data, vix_map, v3_map)
+    neg20 = pct([r["fwd"][20] for r in rows if 20 in r["fwd"]], lambda x: x < 0)
+    print("\nWindow: %s .. %s (%d eligible days)" % (rows[0]["date"], rows[-1]["date"], len(rows)))
+    print("Base rate: SPY 20d-forward negative %.1f%% of all days" % neg20)
+    _vr = [r for r in rows if r["have_vix"]]
+    if _vr:
+        print("VIX/VIX3M coverage: %s .. %s (%d days)" % (_vr[0]["date"], _vr[-1]["date"], len(_vr)))
+    reg = lambda r: r["below200"] and r["below10m"]
+    print("\nForward-return edge vs base (positive edge = ABOVE base = the OPPOSITE of a crash signal):")
+    summarize(rows, "A - below 200DMA", lambda r: r["below200"])
+    summarize(rows, "B - regime (200DMA AND 10M-EMA)", reg)
+    summarize(rows, "C - regime AND VIX backwardation", lambda r: reg(r) and r["backw"])
+    summarize(rows, "D - regime AND vol-expansion", lambda r: reg(r) and r["volx"])
+    summarize(rows, "E - regime AND (backw OR vol-exp)", lambda r: reg(r) and (r["backw"] or r["volx"]))
+    summarize(rows, "F - VIX backwardation alone", lambda r: r["backw"])
+    summarize(rows, "G - vol-expansion alone", lambda r: r["volx"])
+    print("\nEpisode entry outcomes ('hit' = SPY fell over the next 20d; 50%% = coin flip):")
+    entry_line(rows, "B regime", reg)
+    entry_line(rows, "C regime + backwardation", lambda r: reg(r) and r["backw"])
+    entry_line(rows, "D regime + vol-expansion", lambda r: reg(r) and r["volx"])
+    entry_line(rows, "E regime + (backw OR volx)", lambda r: reg(r) and (r["backw"] or r["volx"]))
+    print("\nNOTE: still a SUBSET of the live signal - adds the two reconstructable "
+          "confirmations (VIX/VIX3M backwardation, realized-vol expansion) on top of\n"
+          "the trend regime, but omits breadth %, net liquidity, COT, NAAIM, AAII "
+          "(no free multi-year history). VIX3M limits the confirmation window; the\n"
+          "stricter combos have small samples - read them as directional, not precise.")
 
 
 if __name__ == "__main__":
