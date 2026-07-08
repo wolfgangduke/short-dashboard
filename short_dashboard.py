@@ -140,8 +140,18 @@ UA_HDR = {
 }
 # Client errors that will never succeed on retry (bad key, bad request, missing).
 NO_RETRY_CODES = {400, 401, 403, 404}
+# Per-run response cache (added 2026-07-08): identical GETs within a single run
+# hit the network once. Only SUCCESSFUL responses are cached, so a transient
+# failure can still retry on a later call; market snapshots don't change within a
+# run, so this is a behavior-safe dedupe (e.g. ^VIX 6mo was fetched twice).
+_HTTP_JSON_CACHE = {}
 def http_get_json(url, headers=None, timeout=15, retries=3, backoff=1.0):
-    """GET a URL and parse JSON. Returns (data, error_string)."""
+    """GET a URL and parse JSON. Returns (data, error_string).
+    Successful responses are memoized per-run via _HTTP_JSON_CACHE."""
+    _ck = (url, tuple(sorted((headers or {}).items())))
+    _hit = _HTTP_JSON_CACHE.get(_ck)
+    if _hit is not None:
+        return _hit, None
     last_err = None
     safe = _redact(url)
     for attempt in range(1, retries + 1):
@@ -152,7 +162,9 @@ def http_get_json(url, headers=None, timeout=15, retries=3, backoff=1.0):
             if not raw.strip():
                 last_err = "empty response"
             else:
-                return json.loads(raw), None
+                _data = json.loads(raw)
+                _HTTP_JSON_CACHE[_ck] = _data
+                return _data, None
         except urllib.error.HTTPError as e:
             last_err = "HTTP %s" % e.code
             if e.code in NO_RETRY_CODES:
