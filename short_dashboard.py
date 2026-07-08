@@ -1573,13 +1573,13 @@ if _l2_signals >= 2 and _cal_clear:
 # ---- Plain-English "what to do" summary (deterministic; reads existing verdict vars only) ----
 _ll = (layer2 or "")
 if initiate_short:
-    layman = ("Green light for a short. The trend has rolled over and the warning gauges agree, so the math says this is the setup to act on. Follow the size and exit rules in the verdict above.")
+    layman = ("Green light for a short (a bet the market falls). The trend has rolled over and the warning gauges agree, so the math says this is the setup to act on. Follow the size and exit rules in the verdict above.")
 elif _ll.startswith("ENTRY SIGNAL"):
-    layman = ("Small toe in the water. A couple of early-warning gauges have flipped while the trend is still up, so the math supports a tiny starter short only. Keep it small; this is not the full signal yet.")
+    layman = ("Small starter position. A couple of early-warning gauges have flipped while the trend is still up, so the math supports a tiny starter short (a small bet the market falls) only. Keep it small; this is not the full signal yet.")
 elif primary and "WATCHING" in primary.upper():
-    _t = (" The market is still in an uptrend (above its 200-day line), so the math says stay out for now." if spx_above_200dma is True else " The trend has not clearly rolled over yet, so the math says wait.")
-    _d = (" Breadth is softening, so keep half an eye on it." if dual_red else "")
-    layman = ("Sit tight - no short here." + _t + _d + " There is nothing to do today.")
+    _t = (" The market is still in an uptrend, trading above its 200-day average (the long-term trend line), so the math says stay out for now." if spx_above_200dma is True else " The trend has not clearly rolled over yet, so the math says wait.")
+    _d = ((" Breadth has been weakening for %d day(s), so keep half an eye on it." % dual_red_streak) if dual_red_streak > 0 else "")
+    layman = ("Sit tight - no short (a bet the market falls) here." + _t + _d + " There is nothing to do today.")
 else:
     layman = ("No clear read today. The dashboard did not produce a confident stance, so the safe move is to do nothing and wait for the next update.")
 log.info("Plain-English summary: %s", layman)
