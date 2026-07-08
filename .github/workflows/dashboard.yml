@@ -3,13 +3,18 @@ name: MacroSage SHORT dashboard
 # ---------------------------------------------------------------------------
 # Triggers
 #   * workflow_dispatch: lets you run it on demand from the Actions tab.
-#   * schedule: 22:00 UTC, Monday-Friday. 22:00 UTC is ~17:00-18:00 New York
+#   * schedule: 22:17 UTC (cron '17 22'), Monday-Friday. 22:17 UTC is ~17:17-18:17 New York
 #     time (after the 16:00 US market close, in both winter EST and summer EDT)
 #     and ~06:00 the next morning in Perth (AWST = UTC+8). Running Mon-Fri UTC
 #     lines up with US trading days. GitHub cron is ALWAYS in UTC.
 # ---------------------------------------------------------------------------
 on:
   workflow_dispatch:
+    inputs:
+      fmp_force_fail:
+        description: "Force FMP to return empty so the free fallback tier is exercised (test only)."
+        type: boolean
+        default: false
   schedule:
     - cron: '17 22 * * 1-5'
 
@@ -51,6 +56,9 @@ jobs:
         env:
           PYTHONUTF8: "1"
           PYTHONIOENCODING: "utf-8"
+          # TEST SEAM (workflow input only; not a secret): when true, short_dashboard.py
+          # forces the FMP path empty so the free fallback tier can be verified. Empty on schedule.
+          FMP_FORCE_FAIL: ${{ inputs.fmp_force_fail }}
           FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
           FRED_API_KEY: ${{ secrets.FRED }}
           GMAIL_USER: ${{ secrets.GMAIL_USER }}
