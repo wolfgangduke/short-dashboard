@@ -1783,12 +1783,12 @@ def build_html():
         FONT, day_col, esc(day_chg),
         FONT, MUTED, esc(vs200), ("  " if vs200 and vs50 else ""), esc(vs50),
         b_bg, b_fg, b_bdr, FONT, b_txt)
-    out += ('<tr><td bgcolor="%s" style="background:%s;padding:10px 16px;'
+    out += ('<tr><td bgcolor="%s" style="backgrhound:%s;padding:10px 16px;'
             'border-bottom:1px solid %s;">'
             '<table width="100%%" cellpadding="0" cellspacing="0" border="0"><tr>'
-            '<td width="50%%" style="vertical-align:top;padding-right:12px;">'
+            '<td colspan="2" style="padding-bottom:8px;">' '<div style="font-family:%s;font-size:9px;font-weight:700;color:%s;text-transform:uppercase;letter-spacing:0.7px;margin-bottom:2px;">The Call</div>' '<div style="font-family:%s;font-size:12px;color:%s;line-height:1.45;font-weight:600;">%s</div>' '</td></tr><tr>' '<td width="50%%" style="vertical-align:top;padding-right:12px;">'
             '<div style="font-family:%s;font-size:9px;font-weight:700;color:%s;'
-            'text-transform:uppercase;letter-spacing:0.7px;margin-bottom:2px;">Primary verdict</div>'
+            'text-transform:uppercase;letter-spacing:0.7px;margin-bottom:2px;">Technical Triggers</div>'
             '<div style="font-family:%s;font-size:11px;color:%s;line-height:1.35;">%s</div>'
             '</td>'
             '<td width="50%%" style="vertical-align:top;padding-left:12px;'
@@ -1798,13 +1798,13 @@ def build_html():
             '<div style="font-family:%s;font-size:11px;color:%s;line-height:1.35;">%s</div>'
             '</td></tr>'
             '<tr><td colspan="2" style="padding-top:5px;">'
-            '<div style="font-family:%s;font-size:12px;color:%s;line-height:1.45;font-weight:600;margin-bottom:4px;">%s</div>'
+            
             '<div style="font-family:%s;font-size:9px;color:%s;font-style:italic;">%s</div>'
             '</td></tr></table></td></tr>') % (
         CARD, CARD, BORDER,
+        FONT, MUTED, FONT, TEXT, esc(layman),
         FONT, MUTED, FONT, TEXT, esc(primary or "n/a"),
         BORDER, FONT, MUTED, FONT, TEXT, esc(layer2 or "n/a"),
-        FONT, TEXT, esc(layman),
             FONT, MUTED, esc(gate_note))
     if pre_alert:
         out += ('<tr><td bgcolor="%s" style="background:%s;padding:0 16px 10px;'
@@ -1987,9 +1987,9 @@ vix_card = ("%.1f" % vix_px) if vix_px is not None else "n/a"
 sp_card  = ("%+d bps" % spread_bps) if spread_bps is not None else "n/a"
 br_card  = ("%d%%" % breadth) if breadth is not None else "n/a"
 html = build_html()
-plain = ("MacroSage SHORT signal - %s\nPRIMARY VERDICT: %s\nLAYER 2 VERDICT: %s\nWHAT TO DO: %s\n%s\n%s\n\n"
+plain = ("MacroSage SHORT signal - %s\nTHE CALL: %s\nTECHNICAL TRIGGERS: %s\nLAYER 2 VERDICT: %s\n%s\n%s\n\n"
          "%d of %d indicators retrieved. Research/educational only - not investment advice.\n"
-         % (now, primary, layer2, layman,
+         % (now, layman, primary, layer2,
             (pre_alert_txt + "\n") if pre_alert else "",
             final_signal, TILES_WITH_DATA, TOTAL_TILES))
 try:
