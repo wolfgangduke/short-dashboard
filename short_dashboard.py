@@ -7,7 +7,7 @@ Hardened 2026-06-29:
   * every numeric metric is range-validated; anomalies are logged and dropped
   * on any API failure the last-known-good value (state.json) is used instead
     of crashing, so a single dead API never breaks the run
-  * structured logging to stdout (visible in the GitHub Actions console)
+  * structured logging to stdout (visible in thhe GitHub Actions console)
   * US market-holiday detection (flags stale data, still sends)
   * a final summary line: "Run complete - X/18 signals retrieved, email sent: Y"
 Keys/secrets are read from environment variables (GitHub Actions Secrets) and
@@ -1385,7 +1385,7 @@ except Exception as _ex:
     log.warning("breadth proxy: SPX recent-high context failed: %s", _ex)
 mcclellan_divergence = (nymo_col == "red") and bool(_spx_near_high)
 if spx_above_200dma is True:
-    _200dma_note = " | 200DMA GATE: SPX above 200MA (~%.0f) — cap short conviction YELLOW" % (spx_200dma or 0)
+    _200dma_note = " | 200DMA GATE: SPX above 200MA (~%.0f) — cap short conviction YELLOW" % ((spx_200dma or 0) * 10)
     primary = primary + _200dma_note
     initiate_short = False
 elif spx_above_200dma is False:
@@ -1413,7 +1413,7 @@ if spx_above_10mema is not False:
     if "INITIATE" in _pv_up or "SHORT NOW" in _pv_up:
         primary = primary.replace("INITIATE SHORT", "WATCHING").replace("INITIATE", "WATCHING").replace("SHORT NOW", "WATCHING")
 if spx_above_10mema is True:
-    primary = primary + (" | MONTHLY TREND GATE: SPX above 10M EMA (~%.0f) — INITIATE SHORT blocked" % spx_10mema)
+    primary = primary + (" | MONTHLY TREND GATE: SPX above 10M EMA (~%.0f) — INITIATE SHORT blocked" % (spx_10mema * 10))
 elif spx_above_10mema is False:
     primary = primary + " | MONTHLY TREND GATE: SPX below 10M EMA — gate open for INITIATE SHORT"
 else:
