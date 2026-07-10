@@ -1655,6 +1655,10 @@ if _l2_signals >= 2 and _cal_clear:
 _ll = (layer2 or "")
 if initiate_short:
     layman = ("Green light for a short (a bet the market falls). The trend has rolled over and the warning gauges agree, so the math says this is the setup to act on. Follow the size and exit rules in the verdict above.")
+elif _current_tier in (1, 2):
+    layman = ("%s active. %d red tiles + L2 signal. Sized at %s. "
+              "Tier 3 needs all gates confirmed."
+              % (_tier_label, n_red, size_txt))
 elif _ll.startswith("ENTRY SIGNAL"):
     layman = ("Small starter position. A couple of early-warning gauges have flipped while the trend is still up, so the math supports a tiny starter short (a small bet the market falls) only. Keep it small; this is not the full signal yet.")
 elif primary and "WATCHING" in primary.upper():
