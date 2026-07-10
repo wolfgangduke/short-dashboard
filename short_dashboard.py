@@ -7,7 +7,7 @@ Hardened 2026-06-29:
   * every numeric metric is range-validated; anomalies are logged and dropped
   * on any API failure the last-known-good value (state.json) is used instead
     of crashing, so a single dead API never breaks the run
-  * structured logging to stdout (visible in thhe GitHub Actions console)
+  * structured logging to stdout (visible in thfhe GitHub Actions console)
   * US market-holiday detection (flags stale data, still sends)
   * a final summary line: "Run complete - X/18 signals retrieved, email sent: Y"
 Keys/secrets are read from environment variables (GitHub Actions Secrets) and
@@ -1655,10 +1655,6 @@ if _l2_signals >= 2 and _cal_clear:
 _ll = (layer2 or "")
 if initiate_short:
     layman = ("Green light for a short (a bet the market falls). The trend has rolled over and the warning gauges agree, so the math says this is the setup to act on. Follow the size and exit rules in the verdict above.")
-elif _current_tier in (1, 2):
-    layman = ("%s active. %d red tiles + L2 signal. Sized at %s. "
-              "Tier 3 needs all gates confirmed."
-              % (_tier_label, n_red, size_txt))
 elif _ll.startswith("ENTRY SIGNAL"):
     layman = ("Small starter position. A couple of early-warning gauges have flipped while the trend is still up, so the math supports a tiny starter short (a small bet the market falls) only. Keep it small; this is not the full signal yet.")
 elif primary and "WATCHING" in primary.upper():
@@ -1788,7 +1784,7 @@ def build_html():
         FONT, day_col, esc(day_chg),
         FONT, MUTED, esc(vs200), ("  " if vs200 and vs50 else ""), esc(vs50),
         b_bg, b_fg, b_bdr, FONT, b_txt)
-    out += ('<tr><td bgcolor="%s" style="backgrhound:%s;padding:10px 16px;'
+    out += ('<tr><td bgcolor="%s" style="background:%s;padding:10px 16px;'
             'border-bottom:1px solid %s;">'
             '<table width="100%%" cellpadding="0" cellspacing="0" border="0"><tr>'
             '<td colspan="2" style="padding-bottom:8px;">' '<div style="font-family:%s;font-size:9px;font-weight:700;color:%s;text-transform:uppercase;letter-spacing:0.7px;margin-bottom:2px;">The Call</div>' '<div style="font-family:%s;font-size:12px;color:%s;line-height:1.45;font-weight:600;">%s</div>' '</td></tr><tr>' '<td width="50%%" style="vertical-align:top;padding-right:12px;">'
