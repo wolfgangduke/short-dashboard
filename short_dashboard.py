@@ -1756,12 +1756,13 @@ def build_html():
     out += ('<tr><td bgcolor="%s" style="background:%s;padding:13px 16px;'
             'border-radius:10px 10px 0 0;border-bottom:1px solid %s;">'
             '<table width="100%%" cellpadding="0" cellspacing="0" border="0"><tr>'
-            '<td style="font-family:%s;">'
-            '<div style="font-size:15px;font-weight:700;letter-spacing:0.5px;color:%s;">MACROSAGE</div>'
-            '<div style="font-size:9px;font-weight:600;letter-spacing:0.5px;color:%s;margin-top:2px;">MARKET CRASH MONITOR</div>'
+            '<td style="font-family:%s;vertical-align:middle;">'
+            '<img src="cid:masthead" width="132" '
+            'alt="MacroSage - S&amp;P 500 Crash Monitor" '
+            'style="display:block;border:0;outline:none;text-decoration:none;width:132px;height:auto;">'
             '</td>'
-            '<td align="right" style="font-family:%s;font-size:10px;color:%s;">%s</td>'
-            '</tr></table></td></tr>') % (CARD, CARD, BORDER, FONT, STEEL, MUTED, FONT, MUTED, esc(today))
+            '<td align="right" style="font-family:%s;font-size:10px;color:%s;vertical-align:middle;">%s</td>'
+            '</tr></table></td></tr>') % (CARD, CARD, BORDER, FONT, FONT, MUTED, esc(today))
     if stale_banner:
         out += f'<tr><td style="padding:0 16px 12px 16px;">{stale_banner}</td></tr>'
     out += ('<tr><td bgcolor="%s" style="background:%s;padding:11px 16px;'
@@ -2008,6 +2009,7 @@ def send_email():
         return False
     import glob as _glob
     from email.mime.base import MIMEBase
+    from email.mime.image import MIMEImage
     from email import encoders as _encoders
     # Subject is neutral day-to-day; only an active CRASH ALERT escalates it,
     # so a calm/WATCHING day never looks alarming from the inbox.
@@ -2027,7 +2029,22 @@ def send_email():
     if _cc:
         msg["Cc"] = ", ".join(_cc)
      
-    msg.attach(_alt)
+    # Wrap the HTML alternative + inline masthead logo in multipart/related so the
+    # cid:masthead reference in build_html renders reliably (incl. Gmail). Fail-safe:
+    # a missing logo file never blocks the send (the img alt text shows instead).
+    _related = MIMEMultipart("related")
+    _related.attach(_alt)
+    try:
+        _logo_path = os.path.join(HERE, "assets", "macrosage-logo.png")
+        with open(_logo_path, "rb") as _lf:
+            _logo = MIMEImage(_lf.read())
+        _logo.add_header("Content-ID", "<masthead>")
+        _logo.add_header("Content-Disposition", "inline", filename="macrosage-logo.png")
+        _related.attach(_logo)
+        log.info("attached inline masthead logo")
+    except Exception as _lex:
+        log.warning("masthead logo attach failed (%s); sending without it", _lex)
+    msg.attach(_related)
     try:
         _rdir = os.path.join(HERE, "reports")
         _reports = sorted(_glob.glob(os.path.join(_rdir, "short_*.html")))
