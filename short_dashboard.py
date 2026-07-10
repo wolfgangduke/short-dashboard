@@ -1953,7 +1953,8 @@ try:
             "initiate": bool(initiate_short), "n_red": int(n_red),
             "dual_red_streak": int(dual_red_streak),
             "above_200dma": spx_above_200dma, "above_10mema": spx_above_10mema,
-            "ret5": None, "ret10": None, "ret20": None,
+            "blockers": list(blockers), "tiles": [{"t": _t, "sub": _s, "c": _c} for (_t, _s, _c) in p],
+            "ret5": None, "ret10": None, "ret20": None, "ret60": None,
         })
         log.info("signal ledger: appended %s (%s, SPY %.2f)", _today_iso, _sig_state, spy_px)
     # backfill forward returns from a dated SPY history (memoized fetch)
@@ -1966,7 +1967,7 @@ try:
             if _si is None:
                 continue
             _base = _sd[_days[_si]]
-            for _h in (5, 10, 20):
+            for _h in (5, 10, 20, 60):
                 _k = "ret%d" % _h
                 if _row.get(_k) is None and _si + _h < len(_days) and _base:
                     _row[_k] = round((_sd[_days[_si + _h]] / _base - 1) * 100, 2)
