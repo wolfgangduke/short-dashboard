@@ -1,0 +1,25 @@
+name: CI
+
+# Runtime-error gate. py_compile alone catches only SYNTAX errors, so a bug like
+# an undefined variable (the 2026-07 "tile 19 / tiered entry" _current_tier crash)
+# can still reach main. This runs the verdict-engine test harness on every PR and
+# on pushes to main, so that class of crash fails the check BEFORE it merges.
+# No secrets are used or referenced here — the harness is fixture-based.
+on:
+  pull_request:
+  push:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Compile (syntax check)
+        run: python -m py_compile short_dashboard.py backtest.py test_harness.py
+      - name: Verdict-engine test harness (runtime check)
+        run: python test_harness.py
