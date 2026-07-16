@@ -1541,6 +1541,21 @@ n_red = sum(1 for _, _, c in p if c == "red")
 n_amber = sum(1 for _, _, c in p if c == "amber")  # DEAD (flagged 2026-07-06): unused here; build_html recomputes its own. Kept per no-delete rule.
 tile11_red = p[10][2] == "red"   # Sector rotation (Pt11)
 tile16_red = p[15][2] == "red"   # AAII Sentiment  (Pt16)
+# ---- signal-strength tally for SIZING (2026-07-10) --------------------------
+# n_red (above) counts all 18 tiles and stays the tally shown in the email.
+# Position SIZING, though, must reflect INDEPENDENT stress only, so n_stress
+# drops two tiles that inflate the count without adding a distinct signal:
+#   - tile 11 (Sector rotation): its red is derived from breadth (tile 7), so
+#     counting it double-counts the breadth signal.
+#   - tile 12 (Calendar gate): red on OpEx/FOMC PROXIMITY = timing, not stress.
+# The tiers below are the old 16/12/8 boundaries shifted down by 2 to keep a
+# genuine high-stress day in the same sizing bucket after removing those two
+# possible reds. (Approximate recalibration - worth confirming vs the ledger.)
+_SIZING_EXCLUDE = {10, 11}   # 0-based: tile 11 (sector rotation), tile 12 (calendar)
+n_stress = sum(1 for i, (_, _, c) in enumerate(p)
+               if c == "red" and i not in _SIZING_EXCLUDE)
+log.info("sizing tally: n_red=%d (all tiles) | n_stress=%d (independent stress, "
+         "excl. calendar-timing + breadth-derived sector)", n_red, n_stress)
 # ---- 1. dual-red streak (session-guarded, persisted) ----
 dual_red = bool(breadth_red and netliq_decl)
 _prev_streak = int(CACHE.get("dual_red_streak") or 0)
@@ -1582,14 +1597,14 @@ if not _g_fomc:
     blockers.append("FOMC within 2 days")
 initiate_short = not blockers
 # ---- 3. sizing ladder ----
-if n_red >= 16:
-    size_mult, size_txt = 2.0, "2.0x (16-19 red)"
-elif n_red >= 12:
-    size_mult, size_txt = 1.5, "1.5x (12-15 red)"
-elif n_red >= 8:
-    size_mult, size_txt = 1.0, "standard (8-11 red)"
+if n_stress >= 14:
+    size_mult, size_txt = 2.0, "2.0x (14+ independent-stress reds)"
+elif n_stress >= 10:
+    size_mult, size_txt = 1.5, "1.5x (10-13 stress reds)"
+elif n_stress >= 6:
+    size_mult, size_txt = 1.0, "standard (6-9 stress reds)"
 else:
-    size_mult, size_txt = 0.5, "probe only (<8 red)"
+    size_mult, size_txt = 0.5, "probe only (<6 stress reds)"
 # Catalyst auto-confirm (keyless): the down-move is objectively underway when
 # SPY prints a fresh 20-day low AND breakdown volume >=1.2x the 20d average
 # (the volume gate). Replaces the manual-only flag; env/state still force it on.
@@ -1906,7 +1921,7 @@ def build_html():
                "Consecutive TRADING SESSIONS of red breadth (session-guarded). Persistence context for the PRIMARY verdict.")
         + ('<div style="%s">Sizing &amp; risk</div>' % _lg_hdr)
         + _lgm(AMBER, "Signal-strength sizing",
-               "8-11 red tiles = standard, 12-15 = 1.5x, 16-19 = 2x (cap). MAX CONVICTION requires Pt11 (sector rotation) AND Pt16 (AAII) both red.")
+               "6-9 independent-stress tiles = standard, 10-13 = 1.5x, 14+ = 2x (cap). The sizing tally excludes the calendar-timing gate and the breadth-derived sector tile, so OpEx proximity and double-counted breadth can't inflate size. MAX CONVICTION requires Pt11 (sector rotation) AND Pt16 (AAII) both red.")
         + _lgm(AMBER, "Catalyst / post-loss flags",
                "Catalyst auto-confirms when SPY prints a fresh 20-day low AND breakdown volume >=1.2x (else size halves; CATALYST_ON=1 still forces it). Size halves again while POST_LOSS_DESIZE=1 after a 2% exit trigger.")
         + _lgm(AMBER, "Exit rule",
