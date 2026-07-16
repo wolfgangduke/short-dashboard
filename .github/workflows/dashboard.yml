@@ -18,7 +18,8 @@ on:
   schedule:
     - cron: '17 22 * * 1-5'
 
-# Allow the run to commit state.json (the last-known-value cache) back to the repo.
+# Allow the run to push state.json (last-known-value cache + ledger) to the
+# dedicated 'state' branch. main is never written by this workflow.
 permissions:
   contents: write
 
@@ -52,6 +53,19 @@ jobs:
           python -m py_compile short_dashboard.py
           echo "Syntax/compile check passed."
 
+      - name: Restore state.json from the state branch
+        continue-on-error: true
+        run: |
+          # Pull the persisted last-known-value cache + signal ledger from the
+          # 'state' branch into the working tree before the run. Fail-safe: if the
+          # branch or file is absent, fall back to the committed seed / fresh start.
+          if git fetch origin "+refs/heads/state:refs/remotes/origin/state" --depth=1 2>/dev/null && git cat-file -e refs/remotes/origin/state:state.json 2>/dev/null; then
+            git cat-file -p refs/remotes/origin/state:state.json > state.json
+            echo "Restored state.json from the state branch."
+          else
+            echo "No state branch yet; using the committed seed or starting fresh."
+          fi
+
       - name: Run dashboard
         env:
           PYTHONUTF8: "1"
@@ -66,16 +80,29 @@ jobs:
           MAIL_TO: ${{ secrets.MAIL_TO }}
         run: python short_dashboard.py
 
-      - name: Persist last-known values (state.json)
+      - name: Persist state.json to the state branch
         if: always()
+        continue-on-error: true
         run: |
-          if [ -n "$(git status --porcelain state.json)" ]; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add state.json
-            git commit -m "chore: update last-known market values [skip ci]"
-            git push
-            echo "state.json updated and pushed."
-          else
-            echo "No change to state.json; nothing to commit."
+          # State (last-known-value cache + signal ledger) persists on a dedicated
+          # 'state' branch, NOT main, so main stays code-only and branch-protectable.
+          # Git plumbing is used so the working tree / main are never touched.
+          # Fail-safe: any error here never fails the run (the email is already sent).
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin "+refs/heads/state:refs/remotes/origin/state" --depth=1 2>/dev/null || true
+          blob=$(git hash-object -w state.json)
+          cur=$(git rev-parse --verify --quiet refs/remotes/origin/state:state.json || true)
+          if [ "$blob" = "$cur" ]; then
+            echo "state.json unchanged on the state branch; nothing to persist."
+            exit 0
           fi
+          tree=$(printf '100644 blob %s\tstate.json\n' "$blob" | git mktree)
+          base=$(git rev-parse --verify --quiet refs/remotes/origin/state || true)
+          if [ -n "$base" ]; then
+            new=$(git commit-tree "$tree" -p "$base" -m "chore: update last-known market values [skip ci]")
+          else
+            new=$(git commit-tree "$tree" -m "chore: seed last-known market values [skip ci]")
+          fi
+          git push origin "$new:refs/heads/state"
+          echo "state.json persisted to the state branch ($new)."
