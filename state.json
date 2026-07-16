@@ -1,0 +1,654 @@
+{
+  "aaii_bear": {
+    "ts": "2026-07-16T12:15:24",
+    "value": 44.9
+  },
+  "aaii_bull": {
+    "ts": "2026-07-16T12:15:24",
+    "value": 44.9
+  },
+  "backwardation_streak": {
+    "ts": "2026-07-16T12:15:24",
+    "value": 0
+  },
+  "bd_session": {
+    "ts": "2026-07-16T12:15:24",
+    "value": "2026-07-16"
+  },
+  "bp_session": {
+    "ts": "2026-07-16T12:15:24",
+    "value": "2026-07-16"
+  },
+  "breadth": {
+    "ts": "2026-07-16T12:15:24",
+    "value": 45.0
+  },
+  "breadth_decay_streak": {
+    "ts": "2026-07-16T12:15:24",
+    "value": 4
+  },
+  "breadth_proxy_dir": {
+    "ts": "2026-07-16T12:15:24",
+    "value": "NARROWING"
+  },
+  "breadth_proxy_ratio": {
+    "ts": "2026-07-16T12:15:24",
+    "value": 0.28215
+  },
+  "breadth_proxy_slope": {
+    "ts": "2026-07-16T12:15:24",
+    "value": -0.00050578
+  },
+  "breadth_proxy_sma50": {
+    "ts": "2026-07-16T12:15:24",
+    "value": 0.280808
+  },
+  "breadth_proxy_streak": {
+    "ts": "2026-07-16T12:15:24",
+    "value": 7
+  },
+  "cot_col": {
+    "ts": "2026-07-16T12:15:24",
+    "value": "green"
+  },
+  "cot_sub": {
+    "ts": "2026-07-16T12:15:24",
+    "value": "AM net long +21066; Lev chg -9532 [CFTC]"
+  },
+  "deficit_T": {
+    "ts": "2026-07-16T12:15:24",
+    "value": 1.80450791533821
+  },
+  "dual_red_streak": {
+    "ts": "2026-07-16T12:15:24",
+    "value": 0
+  },
+  "dxy": {
+    "ts": "2026-07-16T12:15:24",
+    "value": 120.5046
+  },
+  "gold_px": {
+    "ts": "2026-07-16T12:15:24",
+    "value": 4047.1
+  },
+  "hy_oas": {
+    "ts": "2026-07-16T12:15:24",
+    "value": 2.72
+  },
+  "int_ratio": {
+    "ts": "2026-07-16T12:15:24",
+    "value": 22.666276501412646
+  },
+  "naaim": {
+    "ts": "2026-07-16T12:15:24",
+    "value": 82.95
+  },
+  "netliq_cur": {
+    "ts": "2026-07-16T12:15:24",
+    "value": 5961.396000000001
+  },
+  "netliq_prv": {
+    "ts": "2026-07-16T12:15:24",
+    "value": 5844.049
+  },
+  "nymo": {
+    "ts": "2026-07-16T12:15:24",
+    "value": -39.02
+  },
+  "nymo_ema19": {
+    "ts": "2026-07-16T12:15:24",
+    "value": 228.7562
+  },
+  "nymo_ema39": {
+    "ts": "2026-07-16T12:15:24",
+    "value": 267.7752
+  },
+  "nymo_session": {
+    "ts": "2026-07-16T12:15:24",
+    "value": "2026-07-16"
+  },
+  "outlays_yoy": {
+    "ts": "2026-07-16T12:15:24",
+    "value": 1.5885563215381815
+  },
+  "signal_ledger": {
+    "ts": "2026-07-16T12:15:24",
+    "value": [
+      {
+        "above_10mema": true,
+        "above_200dma": true,
+        "date": "2026-07-08",
+        "dual_red_streak": 0,
+        "initiate": false,
+        "n_red": 4,
+        "ret10": null,
+        "ret20": null,
+        "ret5": 1.26,
+        "spy": 743.53,
+        "state": "WATCHING"
+      },
+      {
+        "above_10mema": true,
+        "above_200dma": true,
+        "date": "2026-07-09",
+        "dual_red_streak": 0,
+        "initiate": false,
+        "n_red": 5,
+        "ret10": null,
+        "ret20": null,
+        "ret5": null,
+        "spy": 745.4,
+        "state": "WATCHING"
+      },
+      {
+        "above_10mema": true,
+        "above_200dma": true,
+        "date": "2026-07-10",
+        "dual_red_streak": 0,
+        "initiate": false,
+        "n_red": 4,
+        "ret10": null,
+        "ret20": null,
+        "ret5": null,
+        "spy": 751.71,
+        "state": "WATCHING"
+      },
+      {
+        "above_10mema": true,
+        "above_200dma": true,
+        "blockers": [
+          "dual-red streak 0/3",
+          "SPX above 200DMA",
+          "SPX above 10M EMA",
+          "volume 0.74x < 1.2x",
+          "R:R 1.8 < 5.0"
+        ],
+        "date": "2026-07-13",
+        "dual_red_streak": 0,
+        "initiate": false,
+        "n_red": 5,
+        "ret10": null,
+        "ret20": null,
+        "ret5": null,
+        "ret60": null,
+        "spy": 749.17,
+        "state": "WATCHING",
+        "tiles": [
+          {
+            "c": "amber",
+            "sub": "SPY 749.17 (-0.77%) | vol 0.74x 20d",
+            "t": "1. Equities (S&P via SPY)"
+          },
+          {
+            "c": "amber",
+            "sub": "17.2",
+            "t": "2. Volatility (VIX)"
+          },
+          {
+            "c": "green",
+            "sub": "2s10s +35 bps",
+            "t": "3. Rates / yield curve"
+          },
+          {
+            "c": "green",
+            "sub": "HY OAS 2.69% (tightening)",
+            "t": "4. Credit spreads"
+          },
+          {
+            "c": "gray",
+            "sub": "Gold $4,008",
+            "t": "5. Commodities (Gold)"
+          },
+          {
+            "c": "green",
+            "sub": "Broad $ 120.5 (falling)",
+            "t": "6. Dollar / FX"
+          },
+          {
+            "c": "red",
+            "sub": "36% advancing",
+            "t": "7. Market breadth"
+          },
+          {
+            "c": "green",
+            "sub": "rising",
+            "t": "8. Net liquidity"
+          },
+          {
+            "c": "green",
+            "sub": "AM net long +21066; Lev chg -9532 [CFTC]",
+            "t": "9. Positioning (COT)"
+          },
+          {
+            "c": "amber",
+            "sub": "VVIX 95 (+9.2%) vs VIX +14.2%",
+            "t": "10. VVIX divergence"
+          },
+          {
+            "c": "red",
+            "sub": "defensive tilt",
+            "t": "11. Sector rotation"
+          },
+          {
+            "c": "red",
+            "sub": "CALENDAR GATE \u2014 TRANSITION WINDOW (OpEx in 4d)",
+            "t": "12. Calendar gate"
+          },
+          {
+            "c": "amber",
+            "sub": "[Deficit $1.80T | Outlays YoY +1.6% | Interest/Receipts 22.7%] \u26a0 interest/receipts >13%",
+            "t": "13. Fiscal impulse"
+          },
+          {
+            "c": "red",
+            "sub": "NYMO -112.5 (below zero) \u26a0 warming up (<39d)",
+            "t": "14. McClellan / NYMO"
+          },
+          {
+            "c": "amber",
+            "sub": "NAAIM 83.0",
+            "t": "15. NAAIM Exposure"
+          },
+          {
+            "c": "amber",
+            "sub": "AAII bull 36% bear 36%",
+            "t": "16. AAII Sentiment"
+          },
+          {
+            "c": "green",
+            "sub": "VIX 17.16 / VIX3M 19.64 = 0.874 \u2014 contango, ratio 0.87 | VIX9D/VIX 0.882 | flattening +0.045/5d",
+            "t": "17. VIX Term Structure (VIX/VIX3M)"
+          },
+          {
+            "c": "red",
+            "sub": "RSP/SPY NARROWING, ratio above 50d MA \u2014 4 sessions | DIVERGENCE vs SPX highs",
+            "t": "18. Breadth proxy (RSP/SPY)"
+          }
+        ]
+      },
+      {
+        "above_10mema": true,
+        "above_200dma": true,
+        "blockers": [
+          "dual-red streak 0/3",
+          "SPX above 200DMA",
+          "SPX above 10M EMA",
+          "volume 0.61x < 1.2x",
+          "R:R 2.1 < 5.0"
+        ],
+        "date": "2026-07-14",
+        "dual_red_streak": 0,
+        "initiate": false,
+        "n_red": 5,
+        "ret10": null,
+        "ret20": null,
+        "ret5": null,
+        "ret60": null,
+        "spy": 751.83,
+        "state": "WATCHING",
+        "tiles": [
+          {
+            "c": "amber",
+            "sub": "SPY 751.83 (+0.36%) | vol 0.61x 20d",
+            "t": "1. Equities (S&P via SPY)"
+          },
+          {
+            "c": "amber",
+            "sub": "16.5",
+            "t": "2. Volatility (VIX)"
+          },
+          {
+            "c": "green",
+            "sub": "2s10s +36 bps",
+            "t": "3. Rates / yield curve"
+          },
+          {
+            "c": "green",
+            "sub": "HY OAS 2.69% (tightening)",
+            "t": "4. Credit spreads"
+          },
+          {
+            "c": "gray",
+            "sub": "Gold $4,056",
+            "t": "5. Commodities (Gold)"
+          },
+          {
+            "c": "green",
+            "sub": "Broad $ 120.5 (falling)",
+            "t": "6. Dollar / FX"
+          },
+          {
+            "c": "red",
+            "sub": "18% advancing",
+            "t": "7. Market breadth"
+          },
+          {
+            "c": "green",
+            "sub": "rising",
+            "t": "8. Net liquidity"
+          },
+          {
+            "c": "green",
+            "sub": "AM net long +21066; Lev chg -9532 [CFTC]",
+            "t": "9. Positioning (COT)"
+          },
+          {
+            "c": "amber",
+            "sub": "VVIX 94 (-1.8%) vs VIX -3.8%",
+            "t": "10. VVIX divergence"
+          },
+          {
+            "c": "red",
+            "sub": "defensive tilt",
+            "t": "11. Sector rotation"
+          },
+          {
+            "c": "red",
+            "sub": "CALENDAR GATE \u2014 TRANSITION WINDOW (OpEx in 3d)",
+            "t": "12. Calendar gate"
+          },
+          {
+            "c": "amber",
+            "sub": "[Deficit $1.80T | Outlays YoY +1.6% | Interest/Receipts 22.7%] \u26a0 interest/receipts >13%",
+            "t": "13. Fiscal impulse"
+          },
+          {
+            "c": "red",
+            "sub": "NYMO -86.3 (below zero) \u26a0 warming up (<39d)",
+            "t": "14. McClellan / NYMO"
+          },
+          {
+            "c": "amber",
+            "sub": "NAAIM 83.0",
+            "t": "15. NAAIM Exposure"
+          },
+          {
+            "c": "amber",
+            "sub": "AAII bull 36% bear 36%",
+            "t": "16. AAII Sentiment"
+          },
+          {
+            "c": "green",
+            "sub": "VIX 16.50 / VIX3M 19.30 = 0.855 \u2014 contango, ratio 0.85 | VIX9D/VIX 0.816 | flattening +0.026/5d",
+            "t": "17. VIX Term Structure (VIX/VIX3M)"
+          },
+          {
+            "c": "red",
+            "sub": "RSP/SPY NARROWING, ratio above 50d MA \u2014 5 sessions | DIVERGENCE vs SPX highs",
+            "t": "18. Breadth proxy (RSP/SPY)"
+          }
+        ]
+      },
+      {
+        "above_10mema": true,
+        "above_200dma": true,
+        "blockers": [
+          "dual-red streak 0/3",
+          "SPX above 200DMA",
+          "SPX above 10M EMA",
+          "volume 0.66x < 1.2x",
+          "R:R 1.3 < 5.0"
+        ],
+        "date": "2026-07-15",
+        "dual_red_streak": 0,
+        "initiate": false,
+        "n_red": 6,
+        "ret10": null,
+        "ret20": null,
+        "ret5": null,
+        "ret60": null,
+        "spy": 754.81,
+        "state": "WATCHING",
+        "tiles": [
+          {
+            "c": "amber",
+            "sub": "SPY 754.81 (+0.40%) | vol 0.66x 20d",
+            "t": "1. Equities (S&P via SPY)"
+          },
+          {
+            "c": "amber",
+            "sub": "15.7",
+            "t": "2. Volatility (VIX)"
+          },
+          {
+            "c": "green",
+            "sub": "2s10s +40 bps",
+            "t": "3. Rates / yield curve"
+          },
+          {
+            "c": "red",
+            "sub": "HY OAS 2.72% (widening)",
+            "t": "4. Credit spreads"
+          },
+          {
+            "c": "gray",
+            "sub": "Gold $4,066",
+            "t": "5. Commodities (Gold)"
+          },
+          {
+            "c": "green",
+            "sub": "Broad $ 120.5 (falling)",
+            "t": "6. Dollar / FX"
+          },
+          {
+            "c": "red",
+            "sub": "45% advancing",
+            "t": "7. Market breadth"
+          },
+          {
+            "c": "green",
+            "sub": "rising",
+            "t": "8. Net liquidity"
+          },
+          {
+            "c": "green",
+            "sub": "AM net long +21066; Lev chg -9532 [CFTC]",
+            "t": "9. Positioning (COT)"
+          },
+          {
+            "c": "amber",
+            "sub": "VVIX 92 (-1.8%) vs VIX -5.0%",
+            "t": "10. VVIX divergence"
+          },
+          {
+            "c": "red",
+            "sub": "defensive tilt",
+            "t": "11. Sector rotation"
+          },
+          {
+            "c": "red",
+            "sub": "CALENDAR GATE \u2014 TRANSITION WINDOW (OpEx in 2d)",
+            "t": "12. Calendar gate"
+          },
+          {
+            "c": "amber",
+            "sub": "[Deficit $1.80T | Outlays YoY +1.6% | Interest/Receipts 22.7%] \u26a0 interest/receipts >13%",
+            "t": "13. Fiscal impulse"
+          },
+          {
+            "c": "red",
+            "sub": "NYMO -61.0 (below zero) \u26a0 warming up (<39d)",
+            "t": "14. McClellan / NYMO"
+          },
+          {
+            "c": "amber",
+            "sub": "NAAIM 83.0",
+            "t": "15. NAAIM Exposure"
+          },
+          {
+            "c": "amber",
+            "sub": "AAII bull 36% bear 36%",
+            "t": "16. AAII Sentiment"
+          },
+          {
+            "c": "green",
+            "sub": "VIX 15.67 / VIX3M 18.91 = 0.829 \u2014 contango, ratio 0.83 | VIX9D/VIX 0.770 | flattening -0.000/5d",
+            "t": "17. VIX Term Structure (VIX/VIX3M)"
+          },
+          {
+            "c": "red",
+            "sub": "RSP/SPY NARROWING, ratio above 50d MA \u2014 6 sessions | DIVERGENCE vs SPX highs",
+            "t": "18. Breadth proxy (RSP/SPY)"
+          }
+        ]
+      },
+      {
+        "above_10mema": true,
+        "above_200dma": true,
+        "blockers": [
+          "dual-red streak 0/3",
+          "SPX above 200DMA",
+          "SPX above 10M EMA",
+          "volume 0.62x < 1.2x",
+          "R:R 1.3 < 5.0"
+        ],
+        "date": "2026-07-16",
+        "dual_red_streak": 0,
+        "initiate": false,
+        "n_red": 6,
+        "ret10": null,
+        "ret20": null,
+        "ret5": null,
+        "ret60": null,
+        "spy": 754.81,
+        "state": "WATCHING",
+        "tiles": [
+          {
+            "c": "amber",
+            "sub": "SPY 754.81 (+0.40%) | vol 0.62x 20d",
+            "t": "1. Equities (S&P via SPY)"
+          },
+          {
+            "c": "amber",
+            "sub": "16.2",
+            "t": "2. Volatility (VIX)"
+          },
+          {
+            "c": "green",
+            "sub": "2s10s +42 bps",
+            "t": "3. Rates / yield curve"
+          },
+          {
+            "c": "red",
+            "sub": "HY OAS 2.72% (widening)",
+            "t": "4. Credit spreads"
+          },
+          {
+            "c": "gray",
+            "sub": "Gold $4,047",
+            "t": "5. Commodities (Gold)"
+          },
+          {
+            "c": "green",
+            "sub": "Broad $ 120.5 (falling)",
+            "t": "6. Dollar / FX"
+          },
+          {
+            "c": "red",
+            "sub": "45% advancing",
+            "t": "7. Market breadth"
+          },
+          {
+            "c": "green",
+            "sub": "rising",
+            "t": "8. Net liquidity"
+          },
+          {
+            "c": "green",
+            "sub": "AM net long +21066; Lev chg -9532 [CFTC]",
+            "t": "9. Positioning (COT)"
+          },
+          {
+            "c": "amber",
+            "sub": "VVIX 92 (-1.8%) vs VIX +3.2%",
+            "t": "10. VVIX divergence"
+          },
+          {
+            "c": "red",
+            "sub": "defensive tilt",
+            "t": "11. Sector rotation"
+          },
+          {
+            "c": "red",
+            "sub": "CALENDAR GATE \u2014 TRANSITION WINDOW (OpEx in 1d)",
+            "t": "12. Calendar gate"
+          },
+          {
+            "c": "amber",
+            "sub": "[Deficit $1.80T | Outlays YoY +1.6% | Interest/Receipts 22.7%] \u26a0 interest/receipts >13%",
+            "t": "13. Fiscal impulse"
+          },
+          {
+            "c": "red",
+            "sub": "NYMO -39.0 (below zero) \u26a0 warming up (<39d)",
+            "t": "14. McClellan / NYMO"
+          },
+          {
+            "c": "amber",
+            "sub": "NAAIM 83.0",
+            "t": "15. NAAIM Exposure"
+          },
+          {
+            "c": "amber",
+            "sub": "AAII bull 45% bear 45%",
+            "t": "16. AAII Sentiment"
+          },
+          {
+            "c": "green",
+            "sub": "VIX 15.03 / VIX3M 18.57 = 0.809 \u2014 contango, ratio 0.81 | VIX9D/VIX 0.742 | flattening -0.039/5d",
+            "t": "17. VIX Term Structure (VIX/VIX3M)"
+          },
+          {
+            "c": "red",
+            "sub": "RSP/SPY NARROWING, ratio above 50d MA \u2014 7 sessions | DIVERGENCE vs SPX highs",
+            "t": "18. Breadth proxy (RSP/SPY)"
+          }
+        ]
+      }
+    ]
+  },
+  "spy_chg": {
+    "ts": "2026-07-16T12:15:24",
+    "value": 0.39637
+  },
+  "spy_px": {
+    "ts": "2026-07-16T12:15:24",
+    "value": 754.81
+  },
+  "vix_px": {
+    "ts": "2026-07-16T12:15:24",
+    "value": 16.17
+  },
+  "vix_ts_last_day": {
+    "ts": "2026-07-16T12:15:24",
+    "value": "2026-07-10"
+  },
+  "vix_ts_ratio": {
+    "ts": "2026-07-16T12:15:24",
+    "value": 0.8094
+  },
+  "vix_ts_regime": {
+    "ts": "2026-07-16T12:15:24",
+    "value": "CONTANGO"
+  },
+  "vix_ts_vix": {
+    "ts": "2026-07-16T12:15:24",
+    "value": 15.03
+  },
+  "vix_ts_vix3m": {
+    "ts": "2026-07-16T12:15:24",
+    "value": 18.57
+  },
+  "vvix_sub": {
+    "ts": "2026-07-16T12:15:24",
+    "value": "VVIX 92 (-1.8%) vs VIX +3.2%"
+  },
+  "y10": {
+    "ts": "2026-07-16T12:15:24",
+    "value": 4.55
+  },
+  "y2": {
+    "ts": "2026-07-16T12:15:24",
+    "value": 4.13
+  }
+}
