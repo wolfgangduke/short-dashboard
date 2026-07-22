@@ -61,6 +61,37 @@ on missing inputs):
   and the interactive HTML report as an attachment.
 - Exit code is red on email-send failure so Actions marks the run failed.
 
+## KNOWN ISSUE — flagged 2026-07-22, RESOLVED same day (root cause: Gmail categorization, not code)
+Manually triggered `workflow_dispatch` run #106 (commit d93259e, branch
+`feat/30y-duration-stress`) completed **Status: Success** in 22s. Bryan
+reported no email visible in his inbox.
+
+**Confirmed via direct Gmail search (not the Actions log, which the automated
+viewer couldn't extract):** the message exists — sent 2026-07-22T19:06:32Z,
+subject "MacroSage — Daily Risk Report — July 22, 2026", To
+wolfgangduke@gmail.com, Cc richard.macrae.gordon@gmail.com, labels
+`SENT` + `INBOX`. SMTP genuinely delivered it and Gmail filed it into the
+inbox at the label level.
+
+**Conclusion: not a send failure, not a code bug.** The `send_email()`
+fail-closed design (sys.exit(1) on every failure path, no
+`continue-on-error` on that step) was correct all along — a real failure
+would have shown red, and it didn't. Most likely explanation for "not
+visible": Gmail's tabbed inbox (Promotions/Updates) miscategorizing an
+automated self-sent HTML email with an attachment, landing it outside the
+Primary tab view even though it's technically in INBOX. Confirm by checking
+those tabs or searching "MacroSage" directly in Gmail.
+
+**Unrelated doc-accuracy note found while investigating (still open, low
+priority):** `dashboard.yml` maps `FRED_API_KEY: ${{ secrets.FRED }}` — the
+real GitHub secret is named `FRED`, not `FRED_API_KEY` as the Secrets
+section below implies. Confirmed this isn't broken (live FRED data fetched
+fine in run #106) — just a stale doc vs. the real secret name.
+
+Not related to the tile 19 (Long-End Duration Stress) change on
+`feat/30y-duration-stress` — filed separately on its own branch rather than
+bundled into that PR.
+
 ## Signal ledger (track record)
 Each trading day the run appends a row to `state.json` (`signal_ledger` key):
 date, SPY level, verdict state, and gate flags. It backfills 5/10/20-trading-day
