@@ -1,118 +1,118 @@
 {
   "aaii_bear": {
-    "ts": "2026-07-21T23:10:24",
+    "ts": "2026-07-22T19:06:26",
     "value": 44.9
   },
   "aaii_bull": {
-    "ts": "2026-07-21T23:10:24",
+    "ts": "2026-07-22T19:06:26",
     "value": 44.9
   },
   "backwardation_streak": {
-    "ts": "2026-07-21T23:10:24",
+    "ts": "2026-07-22T19:06:26",
     "value": 0
   },
   "bd_session": {
-    "ts": "2026-07-20T23:13:28",
-    "value": "2026-07-20"
+    "ts": "2026-07-22T19:06:26",
+    "value": "2026-07-22"
   },
   "bp_session": {
-    "ts": "2026-07-21T23:10:24",
-    "value": "2026-07-21"
+    "ts": "2026-07-22T19:06:26",
+    "value": "2026-07-22"
   },
   "breadth": {
-    "ts": "2026-07-21T23:10:24",
-    "value": 73.0
+    "ts": "2026-07-22T19:06:26",
+    "value": 45.0
   },
   "breadth_decay_streak": {
-    "ts": "2026-07-21T23:10:24",
-    "value": 0
+    "ts": "2026-07-22T19:06:26",
+    "value": 1
   },
   "breadth_proxy_dir": {
-    "ts": "2026-07-21T23:10:24",
+    "ts": "2026-07-22T19:06:26",
     "value": "BROADENING"
   },
   "breadth_proxy_ratio": {
-    "ts": "2026-07-21T23:10:24",
-    "value": 0.284332
+    "ts": "2026-07-22T19:06:26",
+    "value": 0.2841
   },
   "breadth_proxy_slope": {
-    "ts": "2026-07-21T23:10:24",
-    "value": 8.496e-05
+    "ts": "2026-07-22T19:06:26",
+    "value": 0.00038991
   },
   "breadth_proxy_sma50": {
-    "ts": "2026-07-21T23:10:24",
-    "value": 0.28131
+    "ts": "2026-07-22T19:06:26",
+    "value": 0.281458
   },
   "breadth_proxy_streak": {
-    "ts": "2026-07-21T23:10:24",
-    "value": 4
+    "ts": "2026-07-22T19:06:26",
+    "value": 5
   },
   "cot_col": {
-    "ts": "2026-07-21T23:10:24",
+    "ts": "2026-07-22T19:06:26",
     "value": "green"
   },
   "cot_sub": {
-    "ts": "2026-07-21T23:10:24",
+    "ts": "2026-07-22T19:06:26",
     "value": "AM net long +940472; Lev chg -3127 [CFTC]"
   },
   "deficit_T": {
-    "ts": "2026-07-21T23:10:24",
+    "ts": "2026-07-22T19:06:26",
     "value": 1.80450791533821
   },
   "dual_red_streak": {
-    "ts": "2026-07-21T23:10:24",
+    "ts": "2026-07-22T19:06:26",
     "value": 0
   },
   "dxy": {
-    "ts": "2026-07-21T23:10:24",
+    "ts": "2026-07-22T19:06:26",
     "value": 120.5315
   },
   "gold_px": {
-    "ts": "2026-07-21T23:10:24",
-    "value": 4083.7
+    "ts": "2026-07-22T19:06:26",
+    "value": 4142.5
   },
   "hy_oas": {
-    "ts": "2026-07-21T23:10:24",
+    "ts": "2026-07-22T19:06:26",
     "value": 2.69
   },
   "int_ratio": {
-    "ts": "2026-07-21T23:10:24",
+    "ts": "2026-07-22T19:06:26",
     "value": 22.666276501412646
   },
   "naaim": {
-    "ts": "2026-07-21T23:10:24",
+    "ts": "2026-07-22T19:06:26",
     "value": 95.64
   },
   "netliq_cur": {
-    "ts": "2026-07-21T23:10:24",
-    "value": 5986.535000000001
+    "ts": "2026-07-22T19:06:26",
+    "value": 5986.434
   },
   "netliq_prv": {
-    "ts": "2026-07-21T23:10:24",
-    "value": 5961.517000000001
+    "ts": "2026-07-22T19:06:26",
+    "value": 5961.272000000001
   },
   "nymo": {
-    "ts": "2026-07-21T23:10:24",
-    "value": -109.73
+    "ts": "2026-07-22T19:06:26",
+    "value": -93.98
   },
   "nymo_ema19": {
-    "ts": "2026-07-21T23:10:24",
-    "value": 61.6583
+    "ts": "2026-07-22T19:06:26",
+    "value": 82.1925
   },
   "nymo_ema39": {
-    "ts": "2026-07-21T23:10:24",
-    "value": 171.3869
+    "ts": "2026-07-22T19:06:26",
+    "value": 176.1676
   },
   "nymo_session": {
-    "ts": "2026-07-21T23:10:24",
-    "value": "2026-07-21"
+    "ts": "2026-07-22T19:06:26",
+    "value": "2026-07-22"
   },
   "outlays_yoy": {
-    "ts": "2026-07-21T23:10:24",
+    "ts": "2026-07-22T19:06:26",
     "value": 1.5885563215381815
   },
   "signal_ledger": {
-    "ts": "2026-07-21T23:10:24",
+    "ts": "2026-07-22T19:06:26",
     "value": [
       {
         "above_10mema": true,
@@ -121,7 +121,7 @@
         "dual_red_streak": 0,
         "initiate": false,
         "n_red": 4,
-        "ret10": null,
+        "ret10": 0.38,
         "ret20": null,
         "ret5": 1.26,
         "spy": 743.53,
@@ -395,7 +395,7 @@
         "n_red": 6,
         "ret10": null,
         "ret20": null,
-        "ret5": null,
+        "ret5": -0.87,
         "ret60": null,
         "spy": 754.81,
         "state": "WATCHING",
@@ -943,51 +943,173 @@
             "t": "18. Breadth proxy (RSP/SPY)"
           }
         ]
+      },
+      {
+        "above_10mema": true,
+        "above_200dma": true,
+        "blockers": [
+          "dual-red streak 0/3",
+          "SPX above 200DMA",
+          "SPX above 10M EMA",
+          "volume 0.67x < 1.2x",
+          "R:R 3.0 < 5.0"
+        ],
+        "date": "2026-07-22",
+        "dual_red_streak": 0,
+        "initiate": false,
+        "n_red": 6,
+        "ret10": null,
+        "ret20": null,
+        "ret5": null,
+        "ret60": null,
+        "spy": 748.23,
+        "state": "WATCHING",
+        "tiles": [
+          {
+            "c": "amber",
+            "sub": "SPY 748.23 (-0.01%) | vol 0.67x 20d",
+            "t": "1. Equities (S&P via SPY)"
+          },
+          {
+            "c": "amber",
+            "sub": "16.9",
+            "t": "2. Volatility (VIX)"
+          },
+          {
+            "c": "green",
+            "sub": "2s10s +37 bps",
+            "t": "3. Rates / yield curve"
+          },
+          {
+            "c": "green",
+            "sub": "HY OAS 2.69% (tightening)",
+            "t": "4. Credit spreads"
+          },
+          {
+            "c": "gray",
+            "sub": "Gold $4,142",
+            "t": "5. Commodities (Gold)"
+          },
+          {
+            "c": "red",
+            "sub": "Broad $ 120.5 (rising)",
+            "t": "6. Dollar / FX"
+          },
+          {
+            "c": "red",
+            "sub": "45% advancing",
+            "t": "7. Market breadth"
+          },
+          {
+            "c": "green",
+            "sub": "rising",
+            "t": "8. Net liquidity"
+          },
+          {
+            "c": "green",
+            "sub": "AM net long +940472; Lev chg -3127 [CFTC]",
+            "t": "9. Positioning (COT)"
+          },
+          {
+            "c": "amber",
+            "sub": "VVIX 97 (+1.1%) vs VIX -0.6%",
+            "t": "10. VVIX divergence"
+          },
+          {
+            "c": "red",
+            "sub": "defensive tilt",
+            "t": "11. Sector rotation"
+          },
+          {
+            "c": "green",
+            "sub": "clear",
+            "t": "12. Calendar gate"
+          },
+          {
+            "c": "amber",
+            "sub": "[Deficit $1.80T | Outlays YoY +1.6% | Interest/Receipts 22.7%] \u26a0 interest/receipts >13%",
+            "t": "13. Fiscal impulse"
+          },
+          {
+            "c": "red",
+            "sub": "NYMO -94.0 (below zero) \u26a0 warming up (<39d)",
+            "t": "14. McClellan / NYMO"
+          },
+          {
+            "c": "red",
+            "sub": "NAAIM 95.6 (mgrs ALL-IN \u25b2 contrarian-bearish)",
+            "t": "15. NAAIM Exposure"
+          },
+          {
+            "c": "amber",
+            "sub": "AAII bull 45% bear 45%",
+            "t": "16. AAII Sentiment"
+          },
+          {
+            "c": "green",
+            "sub": "VIX 16.94 / VIX3M 19.71 = 0.859 \u2014 contango, ratio 0.86 | VIX9D/VIX 0.908 | flattening -0.014/5d",
+            "t": "17. VIX Term Structure (VIX/VIX3M)"
+          },
+          {
+            "c": "green",
+            "sub": "RSP/SPY BROADENING, ratio above 50d MA \u2014 5 sessions",
+            "t": "18. Breadth proxy (RSP/SPY)"
+          },
+          {
+            "c": "red",
+            "sub": "[30Y 5.11% | Streak 26/60 sessions (43%) | YTD days>5%: 26]",
+            "t": "19. Long-End Duration Stress (30Y)"
+          }
+        ]
       }
     ]
   },
   "spy_chg": {
-    "ts": "2026-07-21T23:10:24",
-    "value": 0.83413
+    "ts": "2026-07-22T19:06:26",
+    "value": -0.0066846
   },
   "spy_px": {
-    "ts": "2026-07-21T23:10:24",
-    "value": 748.28
+    "ts": "2026-07-22T19:06:26",
+    "value": 748.22998
   },
   "vix_px": {
-    "ts": "2026-07-21T23:10:24",
-    "value": 17.05
+    "ts": "2026-07-22T19:06:26",
+    "value": 16.89
   },
   "vix_ts_last_day": {
-    "ts": "2026-07-21T23:10:24",
-    "value": "2026-07-21"
+    "ts": "2026-07-22T19:06:26",
+    "value": "2026-07-22"
   },
   "vix_ts_ratio": {
-    "ts": "2026-07-21T23:10:24",
-    "value": 0.8703
+    "ts": "2026-07-22T19:06:26",
+    "value": 0.8595
   },
   "vix_ts_regime": {
-    "ts": "2026-07-21T23:10:24",
+    "ts": "2026-07-22T19:06:26",
     "value": "CONTANGO"
   },
   "vix_ts_vix": {
-    "ts": "2026-07-21T23:10:24",
-    "value": 17.05
+    "ts": "2026-07-22T19:06:26",
+    "value": 16.94
   },
   "vix_ts_vix3m": {
-    "ts": "2026-07-21T23:10:24",
-    "value": 19.59
+    "ts": "2026-07-22T19:06:26",
+    "value": 19.71
   },
   "vvix_sub": {
-    "ts": "2026-07-21T23:10:24",
-    "value": "VVIX 96 (-6.3%) vs VIX -8.6%"
+    "ts": "2026-07-22T19:06:26",
+    "value": "VVIX 97 (+1.1%) vs VIX -0.6%"
   },
   "y10": {
-    "ts": "2026-07-21T23:10:24",
-    "value": 4.6
+    "ts": "2026-07-22T19:06:26",
+    "value": 4.63
   },
   "y2": {
-    "ts": "2026-07-21T23:10:24",
-    "value": 4.21
+    "ts": "2026-07-22T19:06:26",
+    "value": 4.26
+  },
+  "y30": {
+    "ts": "2026-07-22T19:06:26",
+    "value": 5.13
   }
 }
