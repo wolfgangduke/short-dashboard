@@ -6,7 +6,7 @@ the project each session.
 
 ## What it is
 A daily macro **crash-monitor** dashboard. `short_dashboard.py` pulls free
-market data, scores **18 indicator tiles**, runs a rules-based verdict engine,
+market data, scores **19 indicator tiles**, runs a rules-based verdict engine,
 and emails a colour-coded HTML dashboard to the recipients. It is decision
 support for a discretionary short/crash call — NOT an auto-trader. It never
 places trades or moves money.
@@ -30,7 +30,9 @@ places trades or moves money.
 
 ## Data sources (all free; FMP still primary but now has fallbacks)
 - SPY / VIX / gold spot: **FMP → Yahoo → Stooq**.
-- 2y / 10y Treasury: **FMP → FRED** (`DGS2` / `DGS10`).
+- 2y / 10y / 30y Treasury: **FMP → FRED** (`DGS2` / `DGS10` / `DGS30`). Tile 19
+  (30Y duration stress) additionally pulls a dated 60-session window via
+  `_fred_series_dated()` to score persistence above 5.00%, not just the level.
 - Breadth %: FMP sector snapshot → **WSJ NYSE advance/decline** scrape.
 - NYMO (McClellan): WSJ A/D → Finviz. NAAIM / AAII: site scrapes.
 - VIX term structure (VIX/VIX3M), VIX9D: Yahoo. VVIX: Yahoo.

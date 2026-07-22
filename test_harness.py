@@ -23,6 +23,20 @@ def yahoo_daily(closes, vols=None, ts_start=1750000000):
 def fred(vals):
     return {"observations": [{"value": str(v)} for v in vals]}
 
+def fred_dated(vals, end=None):
+    """FRED-style observations WITH dates (newest-first, matches sort_order=desc),
+    weekday-only spacing. Only _fred_series_dated() readers (the 30Y duration-
+    stress tile) need dates -- other FRED fixtures use the plain fred() above."""
+    import datetime as _dt
+    end = end or _dt.date.today()
+    out, d, i = [], end, 0
+    while i < len(vals):
+        if d.weekday() < 5:
+            out.append({"date": d.isoformat(), "value": str(vals[i])})
+            i += 1
+        d -= _dt.timedelta(days=1)
+    return {"observations": out}
+
 def descending(a, b, n):
     step = (a - b) / (n - 1)
     return [round(a - step * i, 2) for i in range(n)]
@@ -57,7 +71,11 @@ def build_fixtures(spy_daily_closes, spy_px, vols=None, extra=None):
         ("financialmodelingprep", "quote?symbol=SPY", [{"price": spy_px, "changePercentage": -2.5}]),
         ("financialmodelingprep", "quote?symbol=%5EVIX", [{"price": 28.0}]),
         ("financialmodelingprep", "GCUSD", [{"price": 2400.0}]),
-        ("financialmodelingprep", "treasury-rates", [{"year2": 4.0, "year10": 3.5}]),
+        ("financialmodelingprep", "treasury-rates", [{"year2": 4.0, "year10": 3.5, "year30": 4.7}]),
+        # 90 flat sub-5.00% closes -> tile 19 GREEN by default so baseline
+        # scenarios' n_red/n_stress counts are unaffected. Override via
+        # `extra=` (see test_30y_duration_stress below) to exercise red paths.
+        ("stlouisfed", "series_id=DGS30", fred_dated([4.70] * 90)),
         ("financialmodelingprep", "sector-performance-snapshot",
             [{"changesPercentage": -1.0}] * 8 + [{"changesPercentage": 0.5}] * 2),
         ("financialmodelingprep", "economic-calendar", []),
@@ -144,6 +162,40 @@ check("TRANSITION WINDOW" in gA["cal_sub"] or gA["cal_sub"] == "clear",
 check("[Deficit $" in gA["fisc_sub"] and "Outlays YoY" in gA["fisc_sub"],
       "fiscal Point-19 format: %s" % gA["fisc_sub"])
 check(gA["fisc_col"] == "red", "fiscal red (deficit>2T AND outlays>8%)")
+check(gA["y30ds_col"] == "green", "tile 19 green on flat sub-5% 30Y fixture")
+check("Streak" in gA["y30ds_sub"] and "YTD days>5%" in gA["y30ds_sub"],
+      "tile 19 sub-note format: %s" % gA["y30ds_sub"])
+
+print("=" * 70)
+print("SCENARIO A2: 30Y duration stress -> persistent >5% run fires tile 19 red")
+print("=" * 70)
+gA2 = run_scenario("dur30y", descending(520, 400.5, 251), 400.0,
+                  {"dual_red_streak": {"value": 3, "ts": "2026-07-01T00:00:00"}},
+                  extra=[("stlouisfed", "series_id=DGS30",
+                          fred_dated([5.10] * 20 + [4.80] * 70))])
+check(gA2["y30ds_col"] == "red", "tile 19 red: 20/60 sessions >5% clears the 25% threshold")
+check(gA2["y30_hist"][0] == 5.10, "most-recent close read correctly (newest-first)")
+
+print("=" * 70)
+print("SCENARIO A3: 30Y hard override -> single close >5.50% forces red regardless of streak")
+print("=" * 70)
+gA3 = run_scenario("dur30yhard", descending(520, 400.5, 251), 400.0,
+                  {"dual_red_streak": {"value": 3, "ts": "2026-07-01T00:00:00"}},
+                  extra=[("stlouisfed", "series_id=DGS30",
+                          fred_dated([5.55] + [4.60] * 89))])
+check(gA3["y30ds_col"] == "red", "tile 19 red: hard override fires even with only 1/60 above 5.00%")
+
+print("=" * 70)
+print("SCENARIO A4: 30Y data unavailable -> tile 19 degrades gray, never crashes the run")
+print("=" * 70)
+gA4 = run_scenario("dur30ymissing", descending(520, 400.5, 251), 400.0,
+                  {"dual_red_streak": {"value": 3, "ts": "2026-07-01T00:00:00"}},
+                  extra=[("stlouisfed", "series_id=DGS30", {"observations": []}),
+                         ("financialmodelingprep", "treasury-rates",
+                          [{"year2": 4.0, "year10": 3.5}])])  # no year30 key
+check(gA4["y30ds_col"] == "gray", "tile 19 gray when both FMP year30 and FRED DGS30 are empty")
+check(gA4["y30ds_sub"] == "unavailable", "tile 19 sub-note reads 'unavailable', never fabricated")
+check(gA4["initiate_short"] is True, "missing tile 19 data does NOT block other tiles' verdict")
 
 print("=" * 70)
 print("SCENARIO B: SPX ABOVE 200DMA -> must stay WATCHING")
