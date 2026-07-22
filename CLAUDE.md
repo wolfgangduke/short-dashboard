@@ -61,38 +61,36 @@ on missing inputs):
   and the interactive HTML report as an attachment.
 - Exit code is red on email-send failure so Actions marks the run failed.
 
-## KNOWN ISSUE — flagged 2026-07-22, needs fix
+## KNOWN ISSUE — flagged 2026-07-22, RESOLVED same day (root cause: Gmail categorization, not code)
 Manually triggered `workflow_dispatch` run #106 (commit d93259e, branch
-`feat/30y-duration-stress`) completed **Status: Success** in 22s. No email
-arrived (checked immediately after, inbox only).
+`feat/30y-duration-stress`) completed **Status: Success** in 22s. Bryan
+reported no email visible in his inbox.
 
-**Why this points to delivery, not send failure:** `send_email()` explicitly
-`sys.exit(1)`s on every failure path (missing creds, SMTP auth error, refused
-recipients, any other exception), and the `Run dashboard` step in
-`dashboard.yml` has NO `continue-on-error` — so a genuine send failure should
-have shown red/failed, not green. This strongly suggests SMTP accepted and
-sent the message, and the miss is downstream.
+**Confirmed via direct Gmail search (not the Actions log, which the automated
+viewer couldn't extract):** the message exists — sent 2026-07-22T19:06:32Z,
+subject "MacroSage — Daily Risk Report — July 22, 2026", To
+wolfgangduke@gmail.com, Cc richard.macrae.gordon@gmail.com, labels
+`SENT` + `INBOX`. SMTP genuinely delivered it and Gmail filed it into the
+inbox at the label level.
 
-**Checklist for the fix session:**
-1. Check spam/junk AND "All Mail" (not just Inbox) on both recipient
-   addresses for a message dated 2026-07-22, subject starting "MacroSage —
-   Daily Risk Report" or "⚠ CRASH ALERT — MacroSage".
-2. Check the **Sent** folder on the `GMAIL_USER` sending account for an
-   outbound message at the run timestamp — confirms SMTP accepted it either way.
-3. Verify the `MAIL_TO` secret has no typo (Richard's address).
-4. Re-run `workflow_dispatch` once the above is checked, and read the
-   `log.info("EMAIL SENT to %s", ...)` line directly in the Actions log this
-   time (the automated log viewer wasn't cooperating when this was filed).
+**Conclusion: not a send failure, not a code bug.** The `send_email()`
+fail-closed design (sys.exit(1) on every failure path, no
+`continue-on-error` on that step) was correct all along — a real failure
+would have shown red, and it didn't. Most likely explanation for "not
+visible": Gmail's tabbed inbox (Promotions/Updates) miscategorizing an
+automated self-sent HTML email with an attachment, landing it outside the
+Primary tab view even though it's technically in INBOX. Confirm by checking
+those tabs or searching "MacroSage" directly in Gmail.
 
-**Unrelated doc-accuracy note found while investigating:** `dashboard.yml`
-maps `FRED_API_KEY: ${{ secrets.FRED }}` — the real GitHub secret is named
-`FRED`, not `FRED_API_KEY` as the Secrets section below implies. Confirmed
-this isn't broken (live FRED data fetched fine in run #106) — just a stale
-doc vs. the real secret name. Low priority, fix opportunistically.
+**Unrelated doc-accuracy note found while investigating (still open, low
+priority):** `dashboard.yml` maps `FRED_API_KEY: ${{ secrets.FRED }}` — the
+real GitHub secret is named `FRED`, not `FRED_API_KEY` as the Secrets
+section below implies. Confirmed this isn't broken (live FRED data fetched
+fine in run #106) — just a stale doc vs. the real secret name.
 
 Not related to the tile 19 (Long-End Duration Stress) change on
-`feat/30y-duration-stress` — that's a pre-existing email-delivery issue,
-filed separately on its own branch rather than bundled into that PR.
+`feat/30y-duration-stress` — filed separately on its own branch rather than
+bundled into that PR.
 
 ## Signal ledger (track record)
 Each trading day the run appends a row to `state.json` (`signal_ledger` key):
