@@ -198,6 +198,22 @@ check(gA4["y30ds_sub"] == "unavailable", "tile 19 sub-note reads 'unavailable', 
 check(gA4["initiate_short"] is True, "missing tile 19 data does NOT block other tiles' verdict")
 
 print("=" * 70)
+print("SCENARIO A5: 30Y dated fetch fails, but a cached verdict from a PRIOR run exists -> falls back to it, not gray")
+print("=" * 70)
+gA5 = run_scenario("dur30ylastknown", descending(520, 400.5, 251), 400.0,
+                  {"dual_red_streak": {"value": 3, "ts": "2026-07-01T00:00:00"},
+                   "y30ds_sub": {"value": "[30Y 5.20% | Streak 18/60 sessions (30%) | YTD days>5%: 25]",
+                                 "ts": "2026-07-20T00:00:00"},
+                   "y30ds_col": {"value": "red", "ts": "2026-07-20T00:00:00"}},
+                  extra=[("stlouisfed", "series_id=DGS30", {"observations": []}),
+                         ("financialmodelingprep", "treasury-rates",
+                          [{"year2": 4.0, "year10": 3.5}])])  # no year30 key either
+check(gA5["y30ds_col"] == "red", "tile 19 falls back to the cached RED verdict, not gray")
+check(gA5["y30ds_sub"].endswith("(last known)"),
+      "tile 19 sub-note tagged '(last known)': %s" % gA5["y30ds_sub"])
+check("Streak 18/60" in gA5["y30ds_sub"], "cached streak numbers carried through, not fabricated fresh")
+
+print("=" * 70)
 print("SCENARIO B: SPX ABOVE 200DMA -> must stay WATCHING")
 print("=" * 70)
 gB = run_scenario("block200", ascending(350, 500.5, 251), 500.0,

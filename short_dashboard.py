@@ -1580,12 +1580,26 @@ if y30_hist and len(y30_hist) >= 20:
         y30ds_col = "green"
     y30ds_sub = "[30Y %.2f%% | Streak %d/%d sessions (%.0f%%) | YTD days>5%%: %d]" % (
         y30_hist[0], _y30_streak, _y30_n, _y30_pct * 100, y30_ytd_count)
-elif y30 is not None:
-    y30ds_sub = "[30Y %.2f%% | DATA INCOMPLETE -- %d/60 sessions]" % (
-        y30, len(y30_hist) if y30_hist else 0)
-    y30ds_col = "amber"
+    # Persist the computed verdict (not just the raw numbers) so a future run's
+    # dated-fetch failure can fall back to the last real verdict instead of
+    # dropping straight to "unavailable" -- matches the cot_sub/cot_col pattern.
+    CACHE.set("y30ds_sub", y30ds_sub, RUN_TS)
+    CACHE.set("y30ds_col", y30ds_col, RUN_TS)
 else:
-    y30ds_sub, y30ds_col = "unavailable", "gray"
+    log.warning("tile 19: dated FRED pull unavailable/too short (%s sessions); "
+                "falling back to last-known verdict",
+                len(y30_hist) if y30_hist else 0)
+    _y30_cached_sub = CACHE.get("y30ds_sub")
+    _y30_cached_col = CACHE.get("y30ds_col")
+    if _y30_cached_sub:
+        y30ds_sub = _y30_cached_sub + " (last known)"
+        y30ds_col = _y30_cached_col or "amber"
+    elif y30 is not None:
+        y30ds_sub = "[30Y %.2f%% | DATA INCOMPLETE -- %d/60 sessions]" % (
+            y30, len(y30_hist) if y30_hist else 0)
+        y30ds_col = "amber"
+    else:
+        y30ds_sub, y30ds_col = "unavailable", "gray"
 p.append(("19. Long-End Duration Stress (30Y)", y30ds_sub, y30ds_col))
 DEAD = {"unavailable", "no data", "parse error"}
 TILES_WITH_DATA = sum(1 for _, sub, _c in p if str(sub).strip().lower() not in DEAD)
