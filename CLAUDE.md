@@ -14,10 +14,18 @@ places trades or moves money.
 ## How it runs
 - **GitHub Actions cron** (`.github/workflows/dashboard.yml`): `cron: '17 22 * * 1-5'`
   = 22:17 UTC, Monday–Friday (~5:17pm ET), `ubuntu-latest`, `timeout-minutes: 10`.
-- The job runs the script, which emails the dashboard, then commits `state.json`
-  back with `[skip ci]` (so the state write never re-triggers the workflow).
-- Also runnable by hand from the Actions tab ("Run workflow" / `workflow_dispatch`).
+  Also runnable by hand from the Actions tab ("Run workflow" / `workflow_dispatch`).
+- The job runs the script, which emails the dashboard, then persists `state.json`
+  (last-known-value cache + signal ledger) to a **dedicated `state` branch** via
+  raw git plumbing (`hash-object` / `mktree` / `commit-tree` / push) — **main is
+  never written by the workflow**, so main stays code-only and branch-protectable.
+  The restore step at the top of the job pulls `state.json` back off the `state`
+  branch before the run (fail-safe: missing branch/file falls back to the
+  committed seed).
 - Repo is **private**; local clone lives at `C:\Users\WOLFG\Projects\short-dashboard`.
+- **GitHub API write access 403's** for the connector used in some Claude
+  sessions against this private repo — branch pushes and PR merges are done via
+  **local git from the terminal clone**, not the API, for that reason.
 
 ## Files
 - `short_dashboard.py` — the whole engine (data fetch → scoring → verdict → email). ~2100 lines, module-level pipeline that runs on import.
@@ -39,20 +47,143 @@ places trades or moves money.
 - Net liquidity, credit (HY OAS), USD, fiscal (MTS): FRED. COT: CFTC → Tradingster.
 - **HARD RULE: a missing value renders "unavailable" or uses a labelled last-known cache — NEVER a fabricated number.**
 
-## Verdict engine
-`initiate_short` (a real boolean) fires **INITIATE SHORT** only when EVERY gate
-is positively confirmed (fail-closed: unknown data blocks it, it can never fire
-on missing inputs):
-- **Dual-red streak ≥ 3** — breadth < 50% AND net liquidity declining, for 3
-  consecutive trading sessions (session-guarded so weekend/repeat runs can't inflate it).
-- **SPX below 200-day MA** and **SPX below 10-month EMA** (the trend regime).
-- **Volume ≥ 1.2×** the 20-day average on the breakdown session.
-- **Reward:Risk ≥ 5.0**.
-- **FOMC not within 2 days** — NOTE this gate is deliberately **fail-OPEN**: an
-  empty calendar is the normal case, so an unknown FOMC date does NOT block.
-- Sizing ladder by red-tile count; catalyst auto-confirm + post-loss de-size flags.
-- **Layer-2 ENTRY SIGNAL** (2-of-3): vol-expansion/VIX9D/GEX, VIX backwardation,
-  McClellan divergence. **PRE-ALERT** composite is an early-warning tier below Layer-2.
+## Verdict engine — canonical spec
+
+This section is the single source of truth for tile numbering, gates, overrides,
+and sizing. It was reconstructed 2026-07-25 by reading `short_dashboard.py`
+directly (not from prior chat notes), so treat it as authoritative over anything
+said in past sessions. **Any future change to gate logic, tile thresholds, or
+override behavior must be documented in this section in the SAME commit/PR
+that makes the change — no exceptions.**
+
+### Tile map (1–19)
+All tiles live in the `p = [...]` list (`short_dashboard.py:1509-1603`), each a
+`(label, sub-text, color)` tuple. Color is `gray` whenever the metric is fully
+unavailable (no live value AND no cache).
+
+| # | Tile | Data source | Threshold / color rule |
+|---|------|-------------|-------------------------|
+| 1 | Equities (SPY) | FMP quote → Yahoo → Stooq | Informational only; amber if data present, gray if not. |
+| 2 | Volatility (VIX) | FMP quote → Yahoo → Stooq | Informational only; amber/gray. |
+| 3 | Rates / yield curve | FMP `treasury-rates` → FRED `DGS2`/`DGS10` | 2s10s spread in bps; green if ≥0, red if inverted, gray unknown. |
+| 4 | Credit spreads | FRED `BAMLH0A0HYM2` (HY OAS) | red if widening w/w, green if tightening, amber if last-known cache, gray if no data. |
+| 5 | Commodities (Gold) | FMP quote → Yahoo → Stooq | Informational only — no color threshold coded; always gray. |
+| 6 | Dollar / FX | FRED `DTWEXBGS` (broad $ index) | red if rising w/w, green if falling, amber cached, gray no data. |
+| 7 | Market breadth | FMP sector snapshot % advancing → WSJ NYSE A/D fallback | **red if <50%** (dual-red input #1), green if ≥50%, gray unavailable. |
+| 8 | Net liquidity | FRED `WALCL` − `WTREGEN` (TGA) − `RRPONTSYD` (RRP), in $T | **red/"declining"** if current < previous (dual-red input #2), green/"rising" else, gray unknown. |
+| 9 | Positioning (COT) | CFTC E-mini S&P COT → Tradingster fallback (if CFTC >10d stale) | green if asset-mgr net long, red if net short. |
+| 10 | VVIX divergence | Yahoo `^VVIX` vs `^VIX` daily % change | red if VVIX +3%+ while VIX ≤+1%, green if VVIX ≤−2%, amber otherwise. |
+| 11 | Sector rotation | **Derived from tile 7**, not independent data | red ("defensive tilt") if breadth red, green ("broad") else. Excluded from the sizing tally for exactly this reason (see Sizing below). One of the two **MAX CONVICTION** legs. |
+| 12 | Calendar gate | FMP `economic-calendar` (FOMC) + computed 3rd-Friday OpEx | Display flags: `FOMC in Xd` if FOMC ≤5 days out; `CALENDAR GATE — TRANSITION WINDOW (OpEx in Xd)` if OpEx ≤10 days out. red if either flag present. **Note:** this tile's display thresholds (5d / 10d) are wider than the actual PRIMARY-verdict FOMC gate (≤2 days — see Hard gates). |
+| 13 | Fiscal impulse | Treasury MTS via FRED (`MTSDS133FMS` deficit, `MTSO133FMS` outlays, `MTSR133FMS` receipts, `A091RC1Q027SBEA` interest) | red if rolling-12M deficit >$2.0T AND outlays YoY >+8%; amber if deficit $1.5–2.0T or outlays YoY +5–8%; green below both. Sub-note ⚠ if interest/receipts >13%. |
+| 14 | McClellan / NYMO | WSJ NYSE A/D → Finviz fallback; 19/39-day EMA oscillator, session-guarded | green if NYMO ≥0, red if <0. |
+| 15 | NAAIM Exposure | naaim.org scrape (weekly) | red if >90 (managers all-in, contrarian-bearish), green if <40, amber between, gray if no data. |
+| 16 | AAII Sentiment | aaii.com scrape (weekly) | red if bull >55%, green if bear >45%, amber between. The other **MAX CONVICTION** leg. |
+| 17 | VIX Term Structure (VIX/VIX3M) | Yahoo `^VIX` vs `^VIX3M` | BACKWARDATION (ratio ≥1.0) vs CONTANGO; streak is date-guarded. Feeds Layer-2 input #2. **Per `backtest.py`, backwardation is contrarian-BULLISH — it points the wrong way for a short thesis.** |
+| 18 | Breadth proxy (RSP/SPY) | Yahoo → Stooq, RSP÷SPY ratio vs 50d MA + 5-session slope | BROADENING vs NARROWING, session-guarded streak. red if divergence confirmed (narrowing + SPX within 2% of 52wk high), green if broadening, amber if stale cache. |
+| 19 | Long-End Duration Stress (30Y) | FRED `DGS30`, dated 220-calendar-day pull (`_fred_series_dated`) scored over the trailing 60 sessions | red if latest print >5.50% (hard override — "uncharted since 2007") OR ≥25% of the last 60 sessions closed >5.00%; amber if 10–25%; green below 10%. Also reports a YTD day-count >5%. On a failed dated fetch, falls back to the **last cached verdict string**, not gray (2026-07-25 fix — see `299d7f1`). |
+
+### Hard gates — `initiate_short` (PRIMARY / INITIATE SHORT)
+`short_dashboard.py:1650-1675`. `initiate_short` is a real boolean that fires
+only when **every** gate below is positively confirmed — fail-closed by
+default (unknown data blocks; INITIATE can never fire on missing inputs),
+**except the FOMC gate, which is deliberately fail-open**:
+1. **Dual-red streak ≥ 3** — tile 7 breadth <50% AND tile 8 net liquidity
+   declining, for 3 consecutive *trading* sessions (session-guarded: weekend/
+   holiday/repeat-same-day runs cannot inflate the streak).
+2. **SPX confirmed below its 200-day MA** (`spx_above_200dma is False`; `None`
+   = unknown = blocks).
+3. **SPX confirmed below its monthly 10-month EMA** (`spx_above_10mema is
+   False`; `None` blocks).
+4. **Breakdown-session volume ≥ 1.2×** the 20-day average (SPY volume,
+   partial intraday bar dropped pre-16:00 ET). Unknown volume fails closed.
+5. **Reward:Risk ≥ 5.0** — entry = SPY price; stop = 5-session high (floor
+   entry+0.5%, override `RR_STOP`); target = measured-move projection
+   (existing drawdown doubled, override `RR_TARGET`). Unknown inputs fail closed.
+6. **FOMC not within 2 days** (`fomc_days is not None and fomc_days <= 2`
+   blocks) — **fail-OPEN**: an empty/unknown calendar does NOT block, because
+   no-FOMC-this-week is the normal case and a flaky calendar API must not
+   permanently suppress INITIATE.
+
+**Important:** tile 12's OpEx "TRANSITION WINDOW" (≤10 days) does **not** gate
+`initiate_short` directly — only the FOMC ≤2-day check does. OpEx proximity
+does affect the Layer-2 entry check (see below).
+
+### Layer-2 — 2-of-3 ENTRY SIGNAL
+`short_dashboard.py:1727-1745`. Three Layer-2 inputs, computed independently
+of the 19 numbered tiles:
+1. **`gamma_flip`** (GEX proxy) — true if realized-vol expansion (5-day
+   realized vol ≥1.30× its 20-day baseline) OR VIX9D/VIX inversion (≥1.0) OR
+   manual `GEX_FLIP=1`/`gex_flip_manual`. The real GEX/dealer-gamma flip
+   (spotgamma.com) is JS/Cloudflare-walled and is **not** scraped — this is a
+   keyless proxy, with the manual override as the intended path for checking
+   it by hand.
+2. **VIX backwardation** — tile 17's regime, reused.
+3. **McClellan divergence** — tile 14 (NYMO) red AND SPX within 2% of its
+   52-week high.
+
+`layer2` fires `"ENTRY SIGNAL - early/low-conviction (...)"` when **≥2 of the
+3** are true **and** the calendar is clear — the clear-check is a substring
+test on tile 12's combined flag text for `"in 0d"`/`"in 1d"`/`"in 2d"`, so it
+covers **both** an imminent FOMC and an imminent OpEx (only at the 0–2 day
+edge, not the full 10-day OpEx window). Otherwise `layer2` stays `"WAIT"`.
+
+**Discrepancy flagged, not silently resolved:** the code has exactly **two**
+literal `layer2` states — `"WAIT"` (default) and `"ENTRY SIGNAL - ..."`. There
+is **no** distinct `"CALENDAR GATE"` verdict string for Layer-2 in this
+codebase — a near-term FOMC/OpEx event just leaves `layer2` at `"WAIT"`
+without a separate label. The three-verdict framing (ENTRY SIGNAL / WAIT /
+CALENDAR GATE) described in the global `macro-dashboard` skill belongs to a
+*different* system — the ad-hoc 18-point "SHORT" chat trigger — not to this
+repo's coded verdict engine. Don't conflate the two when documenting or
+extending either one.
+
+**PRE-ALERT** (`short_dashboard.py:1483-1505`) is a separate, informational-only
+early-warning tier *below* Layer-2 — it never gates INITIATE and never affects
+sizing. Fires when the breadth proxy (tile 18) has been narrowing ≥3 sessions
+AND at least one of {VIX9D inversion, term-structure velocity acceleration,
+VIX backwardation, vol expansion} is on AND SPX is within 2% of its 52-week high.
+
+### MAX CONVICTION — resolved
+`short_dashboard.py:1704`: `max_conviction = initiate_short and tile11_red and tile16_red`.
+
+**MAX CONVICTION requires `initiate_short` to already be true, PLUS tile 11
+(Sector rotation) AND tile 16 (AAII Sentiment) both red.** This is the Pt11 +
+Pt16 pairing — confirmed directly from the code, not the Pt11+Pt15 variant nor
+any RUT Canary pairing floated in earlier sessions.
+
+**RUT Canary and Crude Cluster 16A/16B do not exist anywhere in
+`short_dashboard.py`** — a full-file grep for `rut canary`, `crude cluster`,
+`16A`, `16B` returns zero matches. They are **retired / never implemented in
+this codebase**, full stop; do not reference them as live tiles or as inputs
+to MAX CONVICTION going forward.
+
+### Override flags
+| Flag | Effect |
+|------|--------|
+| `GEX_FLIP=1` (env) or cache `gex_flip_manual` | Forces the Layer-2 `gamma_flip` proxy true (see Layer-2 input #1 above). |
+| `CATALYST_ON=1` (env) or cache `catalyst_on` | Forces `catalyst_on` true, avoiding the 0.5× no-catalyst size halving. Also auto-confirms (`catalyst_auto`) when SPY prints a fresh 20-day low AND breakdown volume ≥1.2×. |
+| `POST_LOSS_DESIZE=1` (env) or cache `post_loss_desize` | Halves size again (×0.5) after a realized loss. **Not auto-set by any code** — there is no position/P&L tracking in this repo, so this is a purely manual flag set/cleared by hand after a real trade. |
+| `RR_STOP` / `RR_TARGET` (env or cache `rr_stop_manual`/`rr_target_manual`) | Override the mechanical R:R stop (5-session high) / target (measured-move projection) with a level-based value. |
+| `FMP_FORCE_FAIL` | Test seam only (`workflow_dispatch` input) — forces the FMP path dead to exercise the Yahoo/Stooq fallback tier. Not a trading override. |
+
+### Sizing tiers
+Sizing uses `n_stress` (`short_dashboard.py:1621-1635`), **not** the raw
+all-tiles red count (`n_red`, still shown in the email). `n_stress` excludes
+tile 11 (Sector rotation — derived from tile 7, would double-count breadth)
+and tile 12 (Calendar gate — timing, not stress):
+- `n_stress ≥ 14` → **2.0×** (cap)
+- `n_stress ≥ 10` → **1.5×**
+- `n_stress ≥ 6` → **1.0×** (standard)
+- `n_stress < 6` → **0.5×** (probe only)
+- then ×0.5 again if `catalyst_on` is false (no active catalyst)
+- then ×0.5 again if `post_loss` de-sizing is active
+
+### Exit rule
+**2% adverse move within 3 sessions = full exit, no averaging down.** This is
+stated in the email verdict text and legend only — there is **no** position/P&L
+state in the code that tracks or enforces it programmatically. It's a
+discretionary rule for Bryan to apply by hand, not a coded gate.
 
 ## Email
 - Header: **MACROSAGE / MARKET CRASH MONITOR** in calm steel-blue; the red
@@ -88,7 +219,9 @@ those tabs or searching "MacroSage" directly in Gmail.
 priority):** `dashboard.yml` maps `FRED_API_KEY: ${{ secrets.FRED }}` — the
 real GitHub secret is named `FRED`, not `FRED_API_KEY` as the Secrets
 section below implies. Confirmed this isn't broken (live FRED data fetched
-fine in run #106) — just a stale doc vs. the real secret name.
+fine in run #106) — just a stale doc vs. the real secret name. Fix (either is
+fine, not yet done): rename the GitHub secret to `FRED_API_KEY` and drop the
+workflow's env mapping, or rename the workflow's env var / `cfg()` key to `FRED`.
 
 Not related to the tile 19 (Long-End Duration Stress) change on
 `feat/30y-duration-stress` — filed separately on its own branch rather than
@@ -118,12 +251,22 @@ track record began 2026-07-08. Fully fail-safe (wrapped in try/except).
 
 ## Secrets (GitHub → Settings → Secrets and variables → Actions)
 - `FMP_API_KEY` — still primary for spot quotes (free fallbacks behind it).
-- `FRED_API_KEY` — Treasury yields, net liquidity, credit, fiscal.
+- `FRED_API_KEY` in the script / `cfg("FRED_API_KEY")` — Treasury yields, net
+  liquidity, credit, fiscal. **The actual GitHub secret is named `FRED`, not
+  `FRED_API_KEY`** — see the KNOWN ISSUE note above (still open, low priority).
 - `GMAIL_USER`, `GMAIL_APP_PASSWORD` — Gmail SMTP send (app password, 2FA on).
 - `MAIL_TO` — Cc recipients (Richard).
 - `HEALTHCHECK_URL` — OPTIONAL heartbeat (see below). Not yet set.
 - Optional manual overrides: `GEX_FLIP`, `CATALYST_ON`, `POST_LOSS_DESIZE`,
   `RR_STOP`, `RR_TARGET`, `FMP_FORCE_FAIL` (test-forces the FMP fallback path).
+
+## Known issues
+- **`FRED_API_KEY` / secret-name mismatch** — see the KNOWN ISSUE section
+  above (still open, low priority; the GitHub secret is literally named
+  `FRED`, not `FRED_API_KEY`).
+- **Layer-2 has no coded `"CALENDAR GATE"` verdict** — see the discrepancy
+  note under Layer-2 above. Don't assume this repo's Layer-2 has a third
+  verdict state; it doesn't, today.
 
 ## Reliability / heartbeat
 - Silent-failure coverage is two-part: exit-code-red catches a failed email
