@@ -50,7 +50,7 @@ def _utcnow():
 HERE = os.path.dirname(os.path.abspath(__file__))
 STATE_PATH = os.path.join(HERE, "state.json")
 DEFAULT_RECIPIENTS = ["wolfgangduke@gmail.com"]
-TOTAL_TILES = 18  # number of indicator tiles the engine computes
+TOTAL_TILES = 19  # number of indicator tiles the engine computes
 # ---------------------------------------------------------------------------
 # Config / secrets
 # ---------------------------------------------------------------------------
@@ -234,6 +234,25 @@ def fred_series(series, n=2):
         for o in d["observations"]:
             try:
                 out.append(float(o["value"]))
+            except (ValueError, KeyError, TypeError):
+                pass
+        return out or None
+    return None
+def _fred_series_dated(series, n=2):
+    # Like fred_series() but keeps each observation's date. Kept as a SEPARATE
+    # function (not a fred_series() signature change) so fred_series()'s many
+    # existing call sites are untouched -- only the 30Y duration-stress tile
+    # (which needs chronology for its YTD count) uses this.
+    if not FRED:
+        return None
+    url = ("https://api.stlouisfed.org/fred/series/observations?series_id=%s"
+           "&api_key=%s&file_type=json&sort_order=desc&limit=%d" % (series, FRED, n))
+    d, _ = http_get_json(url)
+    if d and isinstance(d, dict) and d.get("observations"):
+        out = []
+        for o in d["observations"]:
+            try:
+                out.append((o["date"], float(o["value"])))
             except (ValueError, KeyError, TypeError):
                 pass
         return out or None
@@ -877,6 +896,23 @@ if y10_v is None:
         y10_v, y10_src = f10[0], "fallback:FRED"
 y10, _ = keep("y10", y10_v, -2, 25, source=y10_src)
 spread_bps = round((y10 - y2) * 100) if (y2 is not None and y10 is not None) else None
+# --- y30 / duration-stress window: FMP primary -> FRED (DGS30) for the
+# latest scalar; historical window is FRED-only (FMP treasury-rates has no
+# history endpoint in this codebase). One dated pull covers BOTH the
+# trailing-60-session streak and the YTD>5% count -- n=220 calendar days
+# comfortably covers Jan 1 through today even after "." (non-trading) rows
+# are dropped, so no second call is needed. ---
+y30_v, y30_src = num(t.get("year30")), "live"
+if y30_v is None:
+    f30 = fred_series("DGS30", 1)
+    if f30:
+        y30_v, y30_src = f30[0], "fallback:FRED"
+y30, _ = keep("y30", y30_v, -2, 25, source=y30_src)
+_y30_dated = _fred_series_dated("DGS30", 220)
+y30_hist = [v for _, v in _y30_dated][:60] if _y30_dated else None
+y30_ytd_count = (sum(1 for d, v in _y30_dated
+                      if d.startswith("%d-" % ET_TODAY.year) and v > 5.00)
+                 if _y30_dated else 0)
 def sector_chg(s):
     for f in ("changesPercentage", "averageChange", "changePercentage", "changePct"):
         if f in s:
@@ -1524,6 +1560,47 @@ if _bp is not None:
 else:
     bp_sub, bp_col = "unavailable", "gray"
 p.append(("18. Breadth proxy (RSP/SPY)", bp_sub, bp_col))
+# --- 19. Long-End Duration Stress (30Y >5.00% persistence, added 2026-07-22) ---
+# Scores PERSISTENCE (streak over a trailing 60-session window), not the raw
+# level -- a single spike is noise, a sustained run is a term-premium/fiscal-
+# dominance regime signal. Independent of Point 13 (fiscal impulse) so it is
+# NOT excluded from the sizing tally: it's a distinct data source (Treasury
+# market pricing), not a restatement of the deficit/outlays driver.
+if y30_hist and len(y30_hist) >= 20:
+    _y30_n = len(y30_hist)
+    _y30_streak = sum(1 for v in y30_hist if v > 5.00)
+    _y30_pct = _y30_streak / _y30_n
+    if y30_hist[0] > 5.50:
+        y30ds_col = "red"  # hard override -- uncharted territory since 2007
+    elif _y30_pct >= 0.25:
+        y30ds_col = "red"
+    elif _y30_pct >= 0.10:
+        y30ds_col = "amber"
+    else:
+        y30ds_col = "green"
+    y30ds_sub = "[30Y %.2f%% | Streak %d/%d sessions (%.0f%%) | YTD days>5%%: %d]" % (
+        y30_hist[0], _y30_streak, _y30_n, _y30_pct * 100, y30_ytd_count)
+    # Persist the computed verdict (not just the raw numbers) so a future run's
+    # dated-fetch failure can fall back to the last real verdict instead of
+    # dropping straight to "unavailable" -- matches the cot_sub/cot_col pattern.
+    CACHE.set("y30ds_sub", y30ds_sub, RUN_TS)
+    CACHE.set("y30ds_col", y30ds_col, RUN_TS)
+else:
+    log.warning("tile 19: dated FRED pull unavailable/too short (%s sessions); "
+                "falling back to last-known verdict",
+                len(y30_hist) if y30_hist else 0)
+    _y30_cached_sub = CACHE.get("y30ds_sub")
+    _y30_cached_col = CACHE.get("y30ds_col")
+    if _y30_cached_sub:
+        y30ds_sub = _y30_cached_sub + " (last known)"
+        y30ds_col = _y30_cached_col or "amber"
+    elif y30 is not None:
+        y30ds_sub = "[30Y %.2f%% | DATA INCOMPLETE -- %d/60 sessions]" % (
+            y30, len(y30_hist) if y30_hist else 0)
+        y30ds_col = "amber"
+    else:
+        y30ds_sub, y30ds_col = "unavailable", "gray"
+p.append(("19. Long-End Duration Stress (30Y)", y30ds_sub, y30ds_col))
 DEAD = {"unavailable", "no data", "parse error"}
 TILES_WITH_DATA = sum(1 for _, sub, _c in p if str(sub).strip().lower() not in DEAD)
 log.info("tiles populated: %d/%d", TILES_WITH_DATA, TOTAL_TILES)
@@ -1938,6 +2015,7 @@ def build_html():
         + _lgm(MUTED, "Fiscal impulse (tile 13)", "Point-19 MTS spec: deficit + outlays YoY + interest/receipts.")
         + _lgm(MUTED, "NAAIM exposure (tile 15)", "Active-manager equity exposure - sentiment/positioning.")
         + _lgm(MUTED, "AAII sentiment (tile 16)", "Retail bull/bear survey - contrarian sentiment context.")
+        + _lgm(MUTED, "Long-end duration stress (tile 19)", "30Y >5.00% persistence over trailing 60 sessions - term-premium/fiscal-dominance regime signal, distinct from tile 13's deficit/outlays driver.")
         + '</td></tr>'
     )
     out += _legend
