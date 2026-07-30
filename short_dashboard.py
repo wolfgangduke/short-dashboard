@@ -1266,6 +1266,13 @@ if len(_ts_series) >= 6:
         ts_velocity, " — ACCELERATING" if ts_accelerating else "")
     log.info("TS velocity: %+.3f per 5 sessions (ratio %.3f) -> accelerating=%s",
              ts_velocity, _ts_series[-1], ts_accelerating)
+    # FIXED 2026-07-30: the sub-text already flagged ACCELERATING here, but
+    # vix_ts_col (set above, before this velocity check existed) stayed green
+    # regardless -- a tile whose own text says the curve is racing toward
+    # backwardation must render at least amber, not green.
+    if ts_accelerating and vix_ts_col == "green":
+        vix_ts_col = "amber"
+        log.info("tile 17 color upgraded green -> amber: TS velocity accelerating")
 else:
     log.warning("TS velocity: insufficient ratio history — off (fail-safe)")
 # Layer-2 vol-regime signal: the paywalled GEX/dealer-gamma flip is replaced by

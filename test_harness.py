@@ -392,6 +392,26 @@ check(gM["ts_accelerating"] is True, "ACCELERATING flag fires (fast flattening n
 check("ACCELERATING" in gM["vix_ts_sub"], "tile 17 shows the flattening rate")
 
 print("=" * 70)
+print("SCENARIO M2: term-structure VELOCITY accelerating while still CONTANGO")
+print("             -> tile 17 must render at least amber, not green")
+print("=" * 70)
+# Unlike Scenario M (the ramp there ends in BACKWARDATION, ratio 1.16), this
+# fixture keeps the final ratio just under 1.0 so the regime stays CONTANGO
+# while the curve is still racing toward inversion (velocity +0.095/5d,
+# ratio 0.965 >= the 0.95 floor). Regression test for the 2026-07-30 fix:
+# the sub-text flagged ACCELERATING but vix_ts_col stayed green regardless.
+gM2 = run_scenario("tsvelcontango", descending(520, 400.5, 251), 400.0,
+                   {"dual_red_streak": {"value": 3, "ts": "2026-07-01T00:00:00"}},
+                   extra=[("yahoo", "chart/%5EVIX?range=6mo",
+                           yahoo_daily([17.0] * 120 + [17.4, 17.8, 18.2, 18.6, 19.0, 19.3])),
+                          ("yahoo", "chart/%5EVIX3M?range=6mo",
+                           yahoo_daily([20.0] * 126))])
+check(gM2["_vts"]["regime"] == "CONTANGO", "regime is still CONTANGO (ratio < 1.0)")
+check(gM2["ts_accelerating"] is True, "ACCELERATING flag fires under contango")
+check(gM2["vix_ts_col"] == "amber",
+      "tile 17 upgraded to amber despite CONTANGO (was green pre-fix)")
+
+print("=" * 70)
 print("SCENARIO N: PRE-ALERT composite - top-proximity divergence (issue #17)")
 print("=" * 70)
 _pa_seed = {"dual_red_streak": {"value": 3, "ts": "2026-07-01T00:00:00"},
