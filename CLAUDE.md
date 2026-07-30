@@ -79,7 +79,7 @@ unavailable (no live value AND no cache).
 | 14 | McClellan / NYMO | WSJ NYSE A/D → Finviz fallback; 19/39-day EMA oscillator, session-guarded | green if NYMO ≥0, red if <0. |
 | 15 | NAAIM Exposure | naaim.org scrape (weekly) | red if >90 (managers all-in, contrarian-bearish), green if <40, amber between, gray if no data. |
 | 16 | AAII Sentiment | aaii.com scrape (weekly) | red if bull >55%, green if bear >45%, amber between. The other **MAX CONVICTION** leg. |
-| 17 | VIX Term Structure (VIX/VIX3M) | Yahoo `^VIX` vs `^VIX3M` | BACKWARDATION (ratio ≥1.0) vs CONTANGO; streak is date-guarded. Feeds Layer-2 input #2. **Per `backtest.py`, backwardation is contrarian-BULLISH — it points the wrong way for a short thesis.** |
+| 17 | VIX Term Structure (VIX/VIX3M) | Yahoo `^VIX` vs `^VIX3M` | BACKWARDATION (ratio ≥1.0, red) vs CONTANGO (green); streak is date-guarded. **Upgraded green→amber (`short_dashboard.py:1273`) when the term-structure velocity input is accelerating** (≥+0.08/5d with ratio ≥0.95) even while still in contango — fixed 2026-07-30, previously stayed green despite the sub-text already flagging "ACCELERATING." Red (confirmed backwardation) is untouched. Feeds Layer-2 input #2. **Per `backtest.py`, backwardation is contrarian-BULLISH — it points the wrong way for a short thesis.** |
 | 18 | Breadth proxy (RSP/SPY) | Yahoo → Stooq, RSP÷SPY ratio vs 50d MA + 5-session slope | BROADENING vs NARROWING, session-guarded streak. red if divergence confirmed (narrowing + SPX within 2% of 52wk high), green if broadening, amber if stale cache. |
 | 19 | Long-End Duration Stress (30Y) | FRED `DGS30`, dated 220-calendar-day pull (`_fred_series_dated`) scored over the trailing 60 sessions | red if latest print >5.50% (hard override — "uncharted since 2007") OR ≥25% of the last 60 sessions closed >5.00%; amber if 10–25%; green below 10%. Also reports a YTD day-count >5%. On a failed dated fetch, falls back to the **last cached verdict string**, not gray (2026-07-25 fix — see `299d7f1`). |
 
@@ -99,7 +99,12 @@ default (unknown data blocks; INITIATE can never fire on missing inputs),
    partial intraday bar dropped pre-16:00 ET). Unknown volume fails closed.
 5. **Reward:Risk ≥ 5.0** — entry = SPY price; stop = 5-session high (floor
    entry+0.5%, override `RR_STOP`); target = measured-move projection
-   (existing drawdown doubled, override `RR_TARGET`). Unknown inputs fail closed.
+   (existing drawdown doubled, override `RR_TARGET`). **Risk is capped at 2%
+   of entry** (`short_dashboard.py:1411`) — matching the Exit rule below, since
+   realized risk can never exceed a 2% adverse move before the position is
+   closed. Before the 2026-07-30 fix, risk used the raw (uncapped) stop
+   distance, which overstated risk and suppressed R:R whenever the 5-session
+   high sat further than 2% from entry. Unknown inputs fail closed.
 6. **FOMC not within 2 days** (`fomc_days is not None and fomc_days <= 2`
    blocks) — **fail-OPEN**: an empty/unknown calendar does NOT block, because
    no-FOMC-this-week is the normal case and a flaky calendar API must not
@@ -178,6 +183,15 @@ and tile 12 (Calendar gate — timing, not stress):
 - `n_stress < 6` → **0.5×** (probe only)
 - then ×0.5 again if `catalyst_on` is false (no active catalyst)
 - then ×0.5 again if `post_loss` de-sizing is active
+
+**Emailed color tally (separate from `n_stress`, informational only):** the
+summary strip in `build_html()` (`short_dashboard.py:1826-1829`) shows four
+buckets — Bearish (red), Watch (amber), Neutral (green), **No Data** (gray) —
+that sum to `len(p)` (19). Before a 2026-07-30 fix it only summed
+red+amber+green, silently dropping gray tiles (e.g. tile 5 Gold, always gray
+by design), so the strip showed 18 even on a 19/19-retrieved day. This tally
+does **not** feed sizing — `n_stress` above is the only sizing input and was
+correct throughout.
 
 ### Exit rule
 **2% adverse move within 3 sessions = full exit, no averaging down.** This is
