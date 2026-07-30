@@ -67,7 +67,7 @@ unavailable (no live value AND no cache).
 | 2 | Volatility (VIX) | FMP quote → Yahoo → Stooq | Informational only; amber/gray. |
 | 3 | Rates / yield curve | FMP `treasury-rates` → FRED `DGS2`/`DGS10` | 2s10s spread in bps; green if ≥0, red if inverted, gray unknown. |
 | 4 | Credit spreads | FRED `BAMLH0A0HYM2` (HY OAS) | red if widening w/w, green if tightening, amber if last-known cache, gray if no data. |
-| 5 | Commodities (Gold) | FMP quote → Yahoo → Stooq | Informational only — no color threshold coded; always gray. |
+| 5 | Commodities (Gold) | FMP quote → Yahoo → Stooq | Informational only, no directional threshold. **green** when `gold_px` is available, **gray** only on genuine fetch failure (no live value and no cache) — fixed 2026-07-31; previously hardcoded gray unconditionally, so it sat in the "No Data" bucket (see Sizing tiers) even on days it had a live price. |
 | 6 | Dollar / FX | FRED `DTWEXBGS` (broad $ index) | red if rising w/w, green if falling, amber cached, gray no data. |
 | 7 | Market breadth | FMP sector snapshot % advancing → WSJ NYSE A/D fallback | **red if <50%** (dual-red input #1), green if ≥50%, gray unavailable. |
 | 8 | Net liquidity | FRED `WALCL` − `WTREGEN` (TGA) − `RRPONTSYD` (RRP), in $T | **red/"declining"** if current < previous (dual-red input #2), green/"rising" else, gray unknown. |
@@ -189,9 +189,10 @@ summary strip in `build_html()` (`short_dashboard.py:1826-1829`) shows four
 buckets — Bearish (red), Watch (amber), Neutral (green), **No Data** (gray) —
 that sum to `len(p)` (19). Before a 2026-07-30 fix it only summed
 red+amber+green, silently dropping gray tiles (e.g. tile 5 Gold, always gray
-by design), so the strip showed 18 even on a 19/19-retrieved day. This tally
-does **not** feed sizing — `n_stress` above is the only sizing input and was
-correct throughout.
+by design at the time), so the strip showed 18 even on a 19/19-retrieved day.
+This tally does **not** feed sizing — `n_stress` above is the only sizing
+input and was correct throughout. Tile 5 is no longer always gray as of the
+2026-07-31 fix — see the Tile map above.
 
 ### Exit rule
 **2% adverse move within 3 sessions = full exit, no averaging down.** This is
