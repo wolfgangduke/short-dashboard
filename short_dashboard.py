@@ -1815,6 +1815,11 @@ def build_html():
     n_red   = sum(1 for _,_,c in p if c == "red")
     n_amber = sum(1 for _,_,c in p if c == "amber")
     n_green = sum(1 for _,_,c in p if c == "green")
+    # FIXED 2026-07-30: red+amber+green alone dropped every "gray" tile (e.g.
+    # tile 5 Commodities/Gold, which is always gray by design), so the strip
+    # totalled 18 even on a 19/19-retrieved day. n_gray makes the four buckets
+    # sum to len(p) again.
+    n_gray  = sum(1 for _,_,c in p if c == "gray")
     def metric_card(title, sub, ckey):
         import re as _re
         col     = sig_color.get(ckey, GRAY)
@@ -1924,25 +1929,31 @@ def build_html():
     out += ('<tr><td bgcolor="%s" style="background:%s;padding:10px 16px;'
             'border-top:1px solid %s;text-align:center;">'
             '<table cellpadding="0" cellspacing="0" border="0" align="center"><tr>'
-            '<td style="padding:0 16px;font-family:%s;text-align:center;">'
+            '<td style="padding:0 12px;font-family:%s;text-align:center;">'
             '<div style="font-size:22px;font-weight:700;color:%s;line-height:1;">%d</div>'
             '<div style="font-size:9px;color:%s;text-transform:uppercase;letter-spacing:0.5px;">Bearish</div>'
             '</td>'
-            '<td style="padding:0 16px;font-family:%s;text-align:center;'
+            '<td style="padding:0 12px;font-family:%s;text-align:center;'
             'border-left:1px solid %s;">'
             '<div style="font-size:22px;font-weight:700;color:%s;line-height:1;">%d</div>'
             '<div style="font-size:9px;color:%s;text-transform:uppercase;letter-spacing:0.5px;">Watch</div>'
             '</td>'
-            '<td style="padding:0 16px;font-family:%s;text-align:center;'
+            '<td style="padding:0 12px;font-family:%s;text-align:center;'
             'border-left:1px solid %s;">'
             '<div style="font-size:22px;font-weight:700;color:%s;line-height:1;">%d</div>'
             '<div style="font-size:9px;color:%s;text-transform:uppercase;letter-spacing:0.5px;">Neutral</div>'
+            '</td>'
+            '<td style="padding:0 12px;font-family:%s;text-align:center;'
+            'border-left:1px solid %s;">'
+            '<div style="font-size:22px;font-weight:700;color:%s;line-height:1;">%d</div>'
+            '<div style="font-size:9px;color:%s;text-transform:uppercase;letter-spacing:0.5px;">No Data</div>'
             '</td>'
             '</tr></table></td></tr>') % (
         CARD, CARD, BORDER,
         FONT, RED, n_red, RED,
         FONT, BORDER, AMBER, n_amber, AMBER,
-        FONT, BORDER, GREEN, n_green, GREEN)
+        FONT, BORDER, GREEN, n_green, GREEN,
+        FONT, BORDER, GRAY, n_gray, GRAY)
     out += ('<tr><td bgcolor="%s" style="background:%s;padding:9px 16px;'
             'border-top:1px solid %s;border-radius:0 0 10px 10px;text-align:center;">'
             '<div style="font-family:%s;font-size:9px;color:%s;line-height:1.6;">'
