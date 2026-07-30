@@ -1537,7 +1537,7 @@ p.append(("3. Rates / yield curve",
 p.append(("4. Credit spreads", credit_sub, credit_col))
 p.append(("5. Commodities (Gold)",
           ("Gold $%s" % fmt_money(gold_px)) if gold_px is not None else "unavailable",
-          "gray"))
+          "green" if gold_px is not None else "gray"))
 p.append(("6. Dollar / FX", usd_sub, usd_col))
 p.append(("7. Market breadth",
           ("%d%% advancing" % breadth) if breadth is not None else "unavailable",
@@ -1822,10 +1822,11 @@ def build_html():
     n_red   = sum(1 for _,_,c in p if c == "red")
     n_amber = sum(1 for _,_,c in p if c == "amber")
     n_green = sum(1 for _,_,c in p if c == "green")
-    # FIXED 2026-07-30: red+amber+green alone dropped every "gray" tile (e.g.
-    # tile 5 Commodities/Gold, which is always gray by design), so the strip
-    # totalled 18 even on a 19/19-retrieved day. n_gray makes the four buckets
-    # sum to len(p) again.
+    # FIXED 2026-07-30: red+amber+green alone dropped every "gray" tile, so the
+    # strip totalled 18 even on a 19/19-retrieved day. n_gray makes the four
+    # buckets sum to len(p). FIXED 2026-07-31: tile 5 (Gold) was hardcoded gray
+    # by design, which the strip then labelled "No Data" despite a live price;
+    # it now colors green (neutral context) when priced, gray only on fetch failure.
     n_gray  = sum(1 for _,_,c in p if c == "gray")
     def metric_card(title, sub, ckey):
         import re as _re
