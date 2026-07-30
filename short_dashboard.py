@@ -1385,6 +1385,10 @@ log.info("GEX status: %s | source https://spotgamma.com/free-tools/spx-gamma-exp
 #   target = measured-move projection: entry - (52wk high - entry), i.e. the
 #            existing drawdown doubled. Deliberately mechanical; override with
 #            env/state RR_TARGET when you have a level-based target.
+#   risk   = capped at the 2% exit rule (see Exit rule below): realized risk
+#            can never exceed 2% of entry, because the position is closed on
+#            a 2% adverse move -- using the raw (often wider) stop distance
+#            overstates risk and suppresses R:R (bug fixed 2026-07-30).
 # Fail-closed: missing inputs -> rr_value None -> INITIATE blocked.
 rr_value = rr_stop = rr_target = None
 try:
@@ -1395,14 +1399,17 @@ try:
         _swing_hi = max(_spy_hist[-5:])
         rr_stop = _stop_ovr if _stop_ovr else max(_swing_hi, spy_px * 1.005)
         rr_target = _tgt_ovr if _tgt_ovr else (spy_px - (_hi52 - spy_px))
-        _risk = rr_stop - spy_px
+        _risk_raw = rr_stop - spy_px
+        _risk_cap = spy_px * 0.02
+        _risk = min(_risk_raw, _risk_cap) if _risk_raw > 0 else _risk_raw
         _reward = spy_px - rr_target
         if _risk > 0 and _reward > 0:
             rr_value = _reward / _risk
-            log.info("R:R gate: entry %.2f stop %.2f target %.2f -> %.1f (need >=5.0)%s%s",
+            log.info("R:R gate: entry %.2f stop %.2f target %.2f -> %.1f (need >=5.0)%s%s%s",
                      spy_px, rr_stop, rr_target, rr_value,
                      " [stop override]" if _stop_ovr else "",
-                     " [target override]" if _tgt_ovr else "")
+                     " [target override]" if _tgt_ovr else "",
+                     " [risk capped at 2% exit rule]" if _risk_cap < _risk_raw else "")
         else:
             log.warning("R:R gate: non-positive risk/reward (stop %.2f target %.2f entry %.2f)",
                         rr_stop, rr_target, spy_px)

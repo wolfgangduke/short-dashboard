@@ -281,10 +281,16 @@ check("< 1.2x" in gF["primary"], "volume named as blocker with ratio")
 check(gF["catalyst_auto"] is False, "catalyst auto stays off without breakdown volume")
 
 print("=" * 70)
-print("SCENARIO G: R:R below 5.0 (stop at 5-day swing high) -> R:R gate blocks")
+print("SCENARIO G: R:R below 5.0 (small existing drawdown, risk capped at 2%) -> R:R gate blocks")
 print("=" * 70)
+# Risk is capped at 2% of entry (see the 2026-07-30 R:R fix): a distant 5-day
+# swing high no longer inflates the denominator, so blocking R:R now requires
+# a genuinely SMALL reward (existing drawdown from the 52wk high), not just a
+# wide stop. hi52 stays modest (430, from the start of the series) and the
+# 5-day swing high (412) sits comfortably above the 2% floor -> reward=30,
+# risk=capped 8.0 (2% of 400) -> R:R 3.75, still < 5.0.
 gG = run_scenario("blockrr",
-                  descending(520, 402, 246) + [447.0, 445.0, 430.0, 415.0, 400.5],
+                  descending(430, 402, 246) + [412.0, 410.0, 408.0, 405.0, 400.5],
                   400.0,
                   {"dual_red_streak": {"value": 3, "ts": "2026-07-01T00:00:00"}})
 check(gG["initiate_short"] is False, "initiate_short is False")
