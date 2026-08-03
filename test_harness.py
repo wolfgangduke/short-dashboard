@@ -128,7 +128,7 @@ def run_scenario(name, spy_closes, spy_px, seed_state, vols=None, extra=None):
     with open(os.path.join(d, "state.json"), "w") as f:
         json.dump(seed_state, f)
     os.environ["FMP_API_KEY"] = "test"
-    os.environ["FRED_API_KEY"] = "test"
+    os.environ["FRED"] = "test"
     os.environ.pop("GMAIL_USER", None)
     install_stub(build_fixtures(spy_closes, spy_px, vols=vols, extra=extra))
     g = runpy.run_path(script)  # run_name != __main__ -> no email/exit

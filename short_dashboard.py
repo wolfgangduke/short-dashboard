@@ -71,7 +71,7 @@ def cfg(k):
     # env vars (Actions secrets) take precedence over .env
     return (os.environ.get(k) or ENV.get(k, "")).strip()
 FMP = cfg("FMP_API_KEY")
-FRED = cfg("FRED_API_KEY")
+FRED = cfg("FRED")
 def recipients():
     """Include the named recipient; merge in anything from MAIL_TO."""
     out = list(DEFAULT_RECIPIENTS)

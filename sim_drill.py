@@ -216,7 +216,7 @@ def run_drill(name, out_dir=None):
     for k in ("GMAIL_USER", "GMAIL_APP_PASSWORD", "MAIL_TO"):
         os.environ.pop(k, None)
     os.environ["FMP_API_KEY"] = "test"
-    os.environ["FRED_API_KEY"] = "test"
+    os.environ["FRED"] = "test"
     install_stub(build_fixtures(sc["closes"], sc["spy_px"],
                                 vols=sc.get("vols"), extra=sc.get("extra")))
     g = runpy.run_path(script)  # run_name != "__main__": no email, no CACHE.save()

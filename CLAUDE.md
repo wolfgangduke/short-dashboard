@@ -236,13 +236,15 @@ automated self-sent HTML email with an attachment, landing it outside the
 Primary tab view even though it's technically in INBOX. Confirm by checking
 those tabs or searching "MacroSage" directly in Gmail.
 
-**Unrelated doc-accuracy note found while investigating (still open, low
-priority):** `dashboard.yml` maps `FRED_API_KEY: ${{ secrets.FRED }}` — the
-real GitHub secret is named `FRED`, not `FRED_API_KEY` as the Secrets
-section below implies. Confirmed this isn't broken (live FRED data fetched
-fine in run #106) — just a stale doc vs. the real secret name. Fix (either is
-fine, not yet done): rename the GitHub secret to `FRED_API_KEY` and drop the
-workflow's env mapping, or rename the workflow's env var / `cfg()` key to `FRED`.
+**Unrelated doc-accuracy note found while investigating — RESOLVED 2026-08-03:**
+`dashboard.yml` mapped `FRED_API_KEY: ${{ secrets.FRED }}` while the script read
+`cfg("FRED_API_KEY")` — the real GitHub secret is named `FRED`, not
+`FRED_API_KEY`. Never broken (live FRED data fetched fine in run #106), just a
+naming mismatch. Fixed by renaming the workflow's env var and the script's
+`cfg()` key to `FRED` throughout (rather than renaming the GitHub secret
+itself) — no GitHub secret rotation needed. **If you have a local `.env` with
+`FRED_API_KEY=...`, rename that key to `FRED` too** — `.env` is gitignored so
+this doc change doesn't touch it for you.
 
 Not related to the tile 19 (Long-End Duration Stress) change on
 `feat/30y-duration-stress` — filed separately on its own branch rather than
@@ -272,9 +274,9 @@ track record began 2026-07-08. Fully fail-safe (wrapped in try/except).
 
 ## Secrets (GitHub → Settings → Secrets and variables → Actions)
 - `FMP_API_KEY` — still primary for spot quotes (free fallbacks behind it).
-- `FRED_API_KEY` in the script / `cfg("FRED_API_KEY")` — Treasury yields, net
-  liquidity, credit, fiscal. **The actual GitHub secret is named `FRED`, not
-  `FRED_API_KEY`** — see the KNOWN ISSUE note above (still open, low priority).
+- `FRED` in the script / `cfg("FRED")` — Treasury yields, net liquidity,
+  credit, fiscal. GitHub secret name and code now match (fixed 2026-08-03 —
+  see the KNOWN ISSUE note above).
 - `GMAIL_USER`, `GMAIL_APP_PASSWORD` — Gmail SMTP send (app password, 2FA on).
 - `MAIL_TO` — Cc recipients (Richard).
 - `HEALTHCHECK_URL` — OPTIONAL heartbeat (see below). Not yet set.
@@ -282,9 +284,6 @@ track record began 2026-07-08. Fully fail-safe (wrapped in try/except).
   `RR_STOP`, `RR_TARGET`, `FMP_FORCE_FAIL` (test-forces the FMP fallback path).
 
 ## Known issues
-- **`FRED_API_KEY` / secret-name mismatch** — see the KNOWN ISSUE section
-  above (still open, low priority; the GitHub secret is literally named
-  `FRED`, not `FRED_API_KEY`).
 - **Layer-2 has no coded `"CALENDAR GATE"` verdict** — see the discrepancy
   note under Layer-2 above. Don't assume this repo's Layer-2 has a third
   verdict state; it doesn't, today.
