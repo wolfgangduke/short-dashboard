@@ -33,7 +33,8 @@ places trades or moves money.
 - `test_harness.py` — verdict-engine test suite (fixtures, no network). Run with `py test_harness.py`; expect `RESULT: ALL CHECKS PASSED`.
 - `sim_drill.py` — escalation-drill simulator. `fmp_client.py` / `run_fmp.py` — FMP helpers/snapshot.
 - `state.json` — last-known-good cache + the signal ledger; committed back each run.
-- `.github/workflows/` — `dashboard.yml` (the daily job), `escalation-drill.yml` (manual), `claude.yml` (PR-comment automation, unrelated to scanning).
+- `.github/workflows/` — `dashboard.yml` (the daily job), `dashboard-watchdog.yml` (checks the cron actually fired; see Reliability below), `escalation-drill.yml` (manual), `claude.yml` (PR-comment automation, unrelated to scanning).
+- `watchdog_alert.py` — standalone alert email sent by `dashboard-watchdog.yml`, stdlib only.
 - `reports/` — saved HTML dashboards.
 
 ## Data sources (all free; FMP still primary but now has fallbacks)
@@ -290,17 +291,31 @@ track record began 2026-07-08. Fully fail-safe (wrapped in try/except).
   verdict state; it doesn't, today.
 
 ## Reliability / heartbeat
-- Silent-failure coverage is two-part: exit-code-red catches a failed email
-  WITHIN a run; a **heartbeat** catches the run not happening at all.
-- The heartbeat code already exists (fires only if `HEALTHCHECK_URL` is set;
-  pings the URL on success, URL/`/fail` on email failure; fail-safe), and
-  `dashboard.yml` now passes `HEALTHCHECK_URL: ${{ secrets.HEALTHCHECK_URL }}`
-  through to the run step (fixed 2026-08-03 — previously the workflow's `env:`
-  block didn't map this secret at all, so `cfg("HEALTHCHECK_URL")` would
-  always read empty in Actions even after the secret was added; local `.env`
-  fallback was unaffected). To activate: create a check at healthchecks.io
-  (cron `17 22 * * 1-5`, UTC, ~1h grace), add an alert channel, and put its
-  ping URL in the `HEALTHCHECK_URL` secret — the workflow wiring is done.
+- Silent-failure coverage is now three-part: exit-code-red catches a failed
+  email WITHIN a run; `dashboard-watchdog.yml` catches the scheduled trigger
+  not firing at all; the (inactive) healthchecks.io heartbeat below would
+  catch both plus anything the watchdog itself misses.
+- **`dashboard-watchdog.yml`** (added 2026-08-04, GitHub-only, no external
+  account needed): runs `00 23 * * 1-5` (~45min after dashboard.yml's 22:17
+  UTC window), checks via `gh run list` whether a `schedule`-triggered
+  `dashboard.yml` run succeeded today, and if not, re-triggers it via
+  `workflow_dispatch` and emails a heads-up (`watchdog_alert.py`). Built
+  after dashboard.yml's Monday 8/3 cron silently didn't fire (no error
+  anywhere — a known GitHub Actions best-effort-scheduling gap, not a bug in
+  this repo's config).
+- The **healthchecks.io heartbeat** code already exists separately (fires
+  only if `HEALTHCHECK_URL` is set; pings the URL on success, URL/`/fail` on
+  email failure; fail-safe), and `dashboard.yml` now passes
+  `HEALTHCHECK_URL: ${{ secrets.HEALTHCHECK_URL }}` through to the run step
+  (fixed 2026-08-03 — previously the workflow's `env:` block didn't map this
+  secret at all, so `cfg("HEALTHCHECK_URL")` would always read empty in
+  Actions even after the secret was added; local `.env` fallback was
+  unaffected). Still **not yet activated** — the workflow wiring is done, but
+  it needs an external account: create a check at healthchecks.io (cron
+  `17 22 * * 1-5`, UTC, ~1h grace), add an alert channel, and put its ping
+  URL in the `HEALTHCHECK_URL` secret. This is the more standard
+  dead-man's-switch and would be a good complement to the watchdog above,
+  not a replacement — do both if/when Bryan sets up the account.
 
 ## Conventions (Bryan's coding rules — follow these)
 - **Zero third-party deps** — stdlib/urllib only.
