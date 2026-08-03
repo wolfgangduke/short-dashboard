@@ -287,9 +287,14 @@ track record began 2026-07-08. Fully fail-safe (wrapped in try/except).
 - Silent-failure coverage is two-part: exit-code-red catches a failed email
   WITHIN a run; a **heartbeat** catches the run not happening at all.
 - The heartbeat code already exists (fires only if `HEALTHCHECK_URL` is set;
-  pings the URL on success, URL/`/fail` on email failure; fail-safe). To activate:
-  create a check at healthchecks.io (cron `17 22 * * 1-5`, UTC, ~1h grace), add
-  an alert channel, and put its ping URL in the `HEALTHCHECK_URL` secret.
+  pings the URL on success, URL/`/fail` on email failure; fail-safe), and
+  `dashboard.yml` now passes `HEALTHCHECK_URL: ${{ secrets.HEALTHCHECK_URL }}`
+  through to the run step (fixed 2026-08-03 — previously the workflow's `env:`
+  block didn't map this secret at all, so `cfg("HEALTHCHECK_URL")` would
+  always read empty in Actions even after the secret was added; local `.env`
+  fallback was unaffected). To activate: create a check at healthchecks.io
+  (cron `17 22 * * 1-5`, UTC, ~1h grace), add an alert channel, and put its
+  ping URL in the `HEALTHCHECK_URL` secret — the workflow wiring is done.
 
 ## Conventions (Bryan's coding rules — follow these)
 - **Zero third-party deps** — stdlib/urllib only.

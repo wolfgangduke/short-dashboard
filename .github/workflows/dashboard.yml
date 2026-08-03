@@ -78,6 +78,7 @@ jobs:
           GMAIL_USER: ${{ secrets.GMAIL_USER }}
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
           MAIL_TO: ${{ secrets.MAIL_TO }}
+          HEALTHCHECK_URL: ${{ secrets.HEALTHCHECK_URL }}
         run: python short_dashboard.py
 
       - name: Persist state.json to the state branch
