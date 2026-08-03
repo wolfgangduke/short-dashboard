@@ -988,13 +988,34 @@ PAL = {"red": ("#fcebeb", "#e24b4a", "#791f1f"),
        "gray": ("#f1efe8", "#888780", "#444441")}
 def fmt_money(v):
     return "n/a" if v is None else ("{:,.0f}".format(v))
-hy = fred_series("BAMLH0A0HYM2", 2)
+# Tile 4 (credit) — recalibrated 2026-08-03: color from LEVEL + 21-session
+# rate-of-change, not the raw day-over-day tick. HY OAS is a DAILY series, so
+# the old hy[0]>hy[1] rule went red on a 2bp uptick even at a historically
+# calm 2.8% level — noise, not stress. Red now needs stress-level spreads
+# (>=4.0%) or a genuine 1-month blowout (>=+0.75pp/21 sessions, the early-
+# credit-stress rate); material-but-subcritical widening (>=+0.25pp) is amber.
+# Fallback with short history keeps the directional rule but level-gates red.
+hy = fred_series("BAMLH0A0HYM2", 25)
 credit_sub, credit_col = "no data", "gray"
 if hy and len(hy) >= 2:
     hy0, _ = keep("hy_oas", hy[0], 0, 30)
     if hy0 is not None:
-        credit_sub = "HY OAS %.2f%% (%s)" % (hy0, "widening" if hy[0] > hy[1] else "tightening")
-        credit_col = "red" if hy[0] > hy[1] else "green"
+        _hy_dir = "widening" if hy[0] > hy[1] else "tightening"
+        _hy_roc = (hy[0] - hy[21]) if len(hy) >= 22 else None  # ~1 trading month
+        if _hy_roc is not None:
+            credit_sub = "HY OAS %.2f%% (%s, %+.2fpp/21d)" % (hy0, _hy_dir, _hy_roc)
+            if hy0 >= 4.0 or _hy_roc >= 0.75:
+                credit_col = "red"
+            elif _hy_roc >= 0.25:
+                credit_col = "amber"
+            else:
+                credit_col = "green"
+        else:
+            credit_sub = "HY OAS %.2f%% (%s)" % (hy0, _hy_dir)
+            if hy[0] > hy[1]:
+                credit_col = "red" if hy0 >= 4.0 else "amber"
+            else:
+                credit_col = "green"
 else:
     c = CACHE.get("hy_oas")
     if c is not None:
@@ -1227,8 +1248,16 @@ if _vts is not None:
         " (last known)" if _vts_stale else "")
     if _vts_stale:
         vix_ts_col = "amber"
+    elif _regime == "BACKWARDATION":
+        # Reclassified 2026-08-03 (roadmap #5, per backtest.py): confirmed
+        # backwardation is contrarian-BULLISH — it fires near panic bottoms,
+        # not short entries. Render amber (elevated-vol watch state) with an
+        # explicit note, never red, so it can no longer inflate the n_stress
+        # sizing tally toward a bigger short at exactly the wrong moment.
+        vix_ts_col = "amber"
+        vix_ts_sub += " | contrarian-BULLISH (panic regime — bounce/exit cue, not short confirmation)"
     else:
-        vix_ts_col = "red" if _regime == "BACKWARDATION" else "green"
+        vix_ts_col = "green"
 else:
     _cached_ratio = CACHE.get("vix_ts_ratio")
     if _cached_ratio is not None:
@@ -1739,14 +1768,19 @@ else:
     head += " | INITIATE blocked by: " + "; ".join(blockers)
 primary = head + _notes_tail
 # ---- 5. Layer-2 2-of-3 ENTRY SIGNAL (moved here so caveats see the final verdict) ----
-_l2_signals = sum([gamma_flip, _vix_backwardation, mcclellan_divergence])
+# Input #2 swapped 2026-08-03 (roadmap #5): was _vix_backwardation, but per
+# backtest.py confirmed backwardation is contrarian-BULLISH (panic-bottom
+# marker) — it must not help trigger a short entry. Replaced with
+# ts_accelerating (term-structure VELOCITY racing toward inversion), the
+# pre-breakdown version of the same curve information.
+_l2_signals = sum([gamma_flip, ts_accelerating, mcclellan_divergence])
 _cal_clear = not any(x in cal_sub for x in ("in 0d", "in 1d", "in 2d"))
 if _l2_signals >= 2 and _cal_clear:
     _l2_names = []
     if gamma_flip: _l2_names.append(
         "vol expansion" if vol_expansion else
         ("VIX9D inversion" if vix9d_inversion else "GEX flip (manual)"))
-    if _vix_backwardation: _l2_names.append("VIX backwardation")
+    if ts_accelerating: _l2_names.append("TS flattening accel")
     if mcclellan_divergence: _l2_names.append("McClellan divergence")
     _why_low = []
     if not initiate_short: _why_low.append("PRIMARY still WATCHING")

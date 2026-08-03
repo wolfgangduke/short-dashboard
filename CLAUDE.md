@@ -66,7 +66,7 @@ unavailable (no live value AND no cache).
 | 1 | Equities (SPY) | FMP quote → Yahoo → Stooq | Informational only; amber if data present, gray if not. |
 | 2 | Volatility (VIX) | FMP quote → Yahoo → Stooq | Informational only; amber/gray. |
 | 3 | Rates / yield curve | FMP `treasury-rates` → FRED `DGS2`/`DGS10` | 2s10s spread in bps; green if ≥0, red if inverted, gray unknown. |
-| 4 | Credit spreads | FRED `BAMLH0A0HYM2` (HY OAS) | red if widening w/w, green if tightening, amber if last-known cache, gray if no data. |
+| 4 | Credit spreads | FRED `BAMLH0A0HYM2` (HY OAS, daily, 25-obs pull) | **Recalibrated 2026-08-03:** color = LEVEL + 21-session rate-of-change, not the raw day tick (old rule went red on a 2bp uptick at a calm 2.8% level). red if OAS ≥4.0% OR Δ21d ≥ +0.75pp (blowout); amber if Δ21d ≥ +0.25pp; green otherwise. Short-history fallback keeps the directional rule but level-gates red (widening only reds at ≥4.0%, else amber). amber if last-known cache, gray if no data. |
 | 5 | Commodities (Gold) | FMP quote → Yahoo → Stooq | Informational only, no directional threshold. **green** when `gold_px` is available, **gray** only on genuine fetch failure (no live value and no cache) — fixed 2026-07-31; previously hardcoded gray unconditionally, so it sat in the "No Data" bucket (see Sizing tiers) even on days it had a live price. |
 | 6 | Dollar / FX | FRED `DTWEXBGS` (broad $ index) | red if rising w/w, green if falling, amber cached, gray no data. |
 | 7 | Market breadth | FMP sector snapshot % advancing → WSJ NYSE A/D fallback | **red if <50%** (dual-red input #1), green if ≥50%, gray unavailable. |
@@ -79,7 +79,7 @@ unavailable (no live value AND no cache).
 | 14 | McClellan / NYMO | WSJ NYSE A/D → Finviz fallback; 19/39-day EMA oscillator, session-guarded | green if NYMO ≥0, red if <0. |
 | 15 | NAAIM Exposure | naaim.org scrape (weekly) | red if >90 (managers all-in, contrarian-bearish), green if <40, amber between, gray if no data. |
 | 16 | AAII Sentiment | aaii.com scrape (weekly) | red if bull >55%, green if bear >45%, amber between. The other **MAX CONVICTION** leg. |
-| 17 | VIX Term Structure (VIX/VIX3M) | Yahoo `^VIX` vs `^VIX3M` | BACKWARDATION (ratio ≥1.0, red) vs CONTANGO (green); streak is date-guarded. **Upgraded green→amber (`short_dashboard.py:1273`) when the term-structure velocity input is accelerating** (≥+0.08/5d with ratio ≥0.95) even while still in contango — fixed 2026-07-30, previously stayed green despite the sub-text already flagging "ACCELERATING." Red (confirmed backwardation) is untouched. Feeds Layer-2 input #2. **Per `backtest.py`, backwardation is contrarian-BULLISH — it points the wrong way for a short thesis.** |
+| 17 | VIX Term Structure (VIX/VIX3M) | Yahoo `^VIX` vs `^VIX3M` | **Reclassified 2026-08-03 (roadmap #5):** confirmed BACKWARDATION now renders **amber** with an explicit "contrarian-BULLISH (panic regime — bounce/exit cue, not short confirmation)" note — never red — because per `backtest.py` backwardation fires near panic bottoms and must not inflate the `n_stress` short-sizing tally. CONTANGO stays green, upgraded green→amber when the term-structure velocity input is accelerating (≥+0.08/5d with ratio ≥0.95) — the 2026-07-30 fix. Streak is date-guarded. `_vix_backwardation` no longer feeds Layer-2 (see Layer-2 input #2 below); it remains a PRE-ALERT informational input only. |
 | 18 | Breadth proxy (RSP/SPY) | Yahoo → Stooq, RSP÷SPY ratio vs 50d MA + 5-session slope | BROADENING vs NARROWING, session-guarded streak. red if divergence confirmed (narrowing + SPX within 2% of 52wk high), green if broadening, amber if stale cache. |
 | 19 | Long-End Duration Stress (30Y) | FRED `DGS30`, dated 220-calendar-day pull (`_fred_series_dated`) scored over the trailing 60 sessions | red if latest print >5.50% (hard override — "uncharted since 2007") OR ≥25% of the last 60 sessions closed >5.00%; amber if 10–25%; green below 10%. Also reports a YTD day-count >5%. On a failed dated fetch, falls back to the **last cached verdict string**, not gray (2026-07-25 fix — see `299d7f1`). |
 
@@ -123,7 +123,13 @@ of the 19 numbered tiles:
    (spotgamma.com) is JS/Cloudflare-walled and is **not** scraped — this is a
    keyless proxy, with the manual override as the intended path for checking
    it by hand.
-2. **VIX backwardation** — tile 17's regime, reused.
+2. **Term-structure velocity (`ts_accelerating`)** — VIX/VIX3M ratio rising
+   ≥+0.08 per 5 sessions with the ratio already ≥0.95 (racing toward
+   inversion). **Swapped in 2026-08-03 (roadmap #5):** this input was
+   previously `_vix_backwardation` (tile 17's regime), but per `backtest.py`
+   confirmed backwardation is contrarian-BULLISH — a panic-bottom marker
+   that must not help trigger a short entry. Velocity is the pre-breakdown
+   version of the same curve information.
 3. **McClellan divergence** — tile 14 (NYMO) red AND SPX within 2% of its
    52-week high.
 
@@ -309,8 +315,13 @@ Prioritised improvements (do as small, independently-verified PRs, never one big
    cross, weekly digest otherwise, plus a "what changed since yesterday" line.
    Needs Bryan's rules on what counts as a state change.
 4. **Heartbeat activation** — Bryan adds the healthchecks.io check + secret.
-5. Possible signal rework: weight vol-expansion, reclassify VIX backwardation as
-   a bounce/exit cue. DEFERRED — small sample; let the ledger accumulate first.
+5. Signal rework — **PARTIALLY DONE 2026-08-03** (user-directed "optimise for
+   correctness"): VIX backwardation reclassified as a bounce/exit cue (tile 17
+   amber not red; Layer-2 input #2 swapped to `ts_accelerating`) and the credit
+   tile level+RoC recalibration shipped. STILL OPEN: weighting vol-expansion in
+   sizing, de-duplicating correlated tile clusters in `n_stress` (breadth 7/18,
+   sentiment 15/16, rates 3/19), and the dual-red net-liquidity 13-week RoC
+   recalibration (needs dated WALCL/TGA/RRP alignment + ledger calibration).
 
 ## Monetization goal (Bryan)
 Not yet monetized; the aim is cash flow. A credible track record (ledger +
