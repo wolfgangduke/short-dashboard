@@ -305,12 +305,17 @@ track record began 2026-07-08. Fully fail-safe (wrapped in try/except).
   this repo's config).
 - The **healthchecks.io heartbeat** code already exists separately (fires
   only if `HEALTHCHECK_URL` is set; pings the URL on success, URL/`/fail` on
-  email failure; fail-safe) but is **not yet activated**. To activate: create
-  a check at healthchecks.io (cron `17 22 * * 1-5`, UTC, ~1h grace), add an
-  alert channel, and put its ping URL in the `HEALTHCHECK_URL` secret. This
-  is the more standard dead-man's-switch and would be a good complement to
-  the watchdog above, not a replacement — do both if/when Bryan sets up the
-  account.
+  email failure; fail-safe), and `dashboard.yml` now passes
+  `HEALTHCHECK_URL: ${{ secrets.HEALTHCHECK_URL }}` through to the run step
+  (fixed 2026-08-03 — previously the workflow's `env:` block didn't map this
+  secret at all, so `cfg("HEALTHCHECK_URL")` would always read empty in
+  Actions even after the secret was added; local `.env` fallback was
+  unaffected). Still **not yet activated** — the workflow wiring is done, but
+  it needs an external account: create a check at healthchecks.io (cron
+  `17 22 * * 1-5`, UTC, ~1h grace), add an alert channel, and put its ping
+  URL in the `HEALTHCHECK_URL` secret. This is the more standard
+  dead-man's-switch and would be a good complement to the watchdog above,
+  not a replacement — do both if/when Bryan sets up the account.
 
 ## Conventions (Bryan's coding rules — follow these)
 - **Zero third-party deps** — stdlib/urllib only.
