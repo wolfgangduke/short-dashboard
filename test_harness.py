@@ -163,6 +163,12 @@ check("[Deficit $" in gA["fisc_sub"] and "Outlays YoY" in gA["fisc_sub"],
       "fiscal Point-19 format: %s" % gA["fisc_sub"])
 check(gA["fisc_col"] == "red", "fiscal red (deficit>2T AND outlays>8%)")
 check(gA["y30ds_col"] == "green", "tile 19 green on flat sub-5% 30Y fixture")
+# Tile 17 reclassification (2026-08-03): fixtures put VIX 28 / VIX3M 25 =
+# ratio 1.12 BACKWARDATION -- must render amber + contrarian note, never red.
+check(gA["vix_ts_col"] == "amber", "tile 17 backwardation renders AMBER (contrarian-bullish), not red")
+check("contrarian-BULLISH" in gA["vix_ts_sub"], "tile 17 carries the bounce/exit-cue note")
+# Tile 4 fallback path (2-obs fixture, widening at 4.5% >= 4.0 level) -> red.
+check(gA["credit_col"] == "red", "credit red: widening at stress level (4.5%) via short-history fallback")
 check("Streak" in gA["y30ds_sub"] and "YTD days>5%" in gA["y30ds_sub"],
       "tile 19 sub-note format: %s" % gA["y30ds_sub"])
 
@@ -438,6 +444,35 @@ gN4 = run_scenario("panovol", ascending(350, 500.5, 251), 500.0, dict(_pa_seed),
                    extra=[("yahoo", "chart/%5EVIX?range=6mo",
                            yahoo_daily(descending(20, 18, 126)))])
 check(gN4["pre_alert"] is False, "leg check: no vol input (contango, no expansion) blocks PRE-ALERT")
+
+print("=" * 70)
+print("SCENARIO O: credit tile level+RoC recalibration (2026-08-03)")
+print("=" * 70)
+# Calm regime: 25 obs flat at 2.84% -> Δ21d = 0, level < 4.0 -> GREEN even
+# though the last day ticked up 1bp (the old rule would have gone red).
+gO1 = run_scenario("creditcalm", descending(520, 400.5, 251), 400.0,
+                   {"dual_red_streak": {"value": 3, "ts": "2026-07-01T00:00:00"}},
+                   extra=[("stlouisfed", "series_id=BAMLH0A0HYM2",
+                           fred([2.84, 2.83] + [2.84] * 23))])
+check(gO1["credit_col"] == "green",
+      "calm spreads (2.84%%, flat 21d) render GREEN despite a 1bp daily uptick (got %s)" % gO1["credit_col"])
+check("+0.00pp/21d" in gO1["credit_sub"] or "-0.00pp/21d" in gO1["credit_sub"],
+      "sub-text shows the 21-session RoC: %s" % gO1["credit_sub"])
+# Blowout regime: level still sub-4.0 but +0.80pp over 21 sessions -> RED
+# (rate-of-change stress fires before the level threshold is reached).
+gO2 = run_scenario("creditblow", descending(520, 400.5, 251), 400.0,
+                   {"dual_red_streak": {"value": 3, "ts": "2026-07-01T00:00:00"}},
+                   extra=[("stlouisfed", "series_id=BAMLH0A0HYM2",
+                           fred([3.60, 3.55] + [3.30] * 19 + [2.80] * 4))])
+check(gO2["credit_col"] == "red",
+      "1-month blowout (+0.80pp/21d) renders RED below the 4.0%% level (got %s)" % gO2["credit_col"])
+# Material-but-subcritical widening: +0.30pp/21d at a calm level -> AMBER.
+gO3 = run_scenario("creditwatch", descending(520, 400.5, 251), 400.0,
+                   {"dual_red_streak": {"value": 3, "ts": "2026-07-01T00:00:00"}},
+                   extra=[("stlouisfed", "series_id=BAMLH0A0HYM2",
+                           fred([3.10, 3.08] + [2.95] * 19 + [2.80] * 4))])
+check(gO3["credit_col"] == "amber",
+      "material widening (+0.30pp/21d, calm level) renders AMBER (got %s)" % gO3["credit_col"])
 
 print("=" * 70)
 print("RESULT: " + ("*** FAILURES ***" if FAILED else "ALL CHECKS PASSED"))
