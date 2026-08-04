@@ -36,24 +36,30 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Check for a successful scheduled dashboard run today
+      - name: Check for a successful dashboard run today
         id: check
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           today=$(date -u +%Y-%m-%d)
+          # Any successful run counts as healthy - schedule, workflow_dispatch (manual
+          # recovery), or this watchdog's own re-trigger. What matters is whether
+          # today's email actually went out, not which trigger sent it. (The script
+          # itself is idempotent as of 2026-08-04 - short_dashboard.py's
+          # email_sent_date guard - so even if the real cron later fires late on top
+          # of a recovery run, it won't double-send.)
           found=$(gh run list --repo "${{ github.repository }}" --workflow dashboard.yml \
-            --json event,conclusion,createdAt --limit 20 \
-            --jq "[.[] | select(.event==\"schedule\" and .conclusion==\"success\" and (.createdAt | startswith(\"$today\")))] | length")
+            --json conclusion,createdAt --limit 20 \
+            --jq "[.[] | select(.conclusion==\"success\" and (.createdAt | startswith(\"$today\")))] | length")
           echo "found=$found" >> "$GITHUB_OUTPUT"
-          echo "Successful scheduled dashboard runs today ($today UTC): $found"
+          echo "Successful dashboard runs today ($today UTC): $found"
 
-      - name: Re-trigger the dashboard (its schedule didn't produce a successful run today)
+      - name: Re-trigger the dashboard (no successful run today)
         if: steps.check.outputs.found == '0'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "::warning::dashboard.yml has no successful scheduled run today - re-triggering via workflow_dispatch."
+          echo "::warning::dashboard.yml has no successful run today - re-triggering via workflow_dispatch."
           gh workflow run dashboard.yml --repo "${{ github.repository }}"
 
       - name: Checkout
