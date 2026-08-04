@@ -2239,11 +2239,28 @@ if __name__ == "__main__":
              spx_card, vix_card, sp_card, br_card)
     log.info("PRIMARY: %s | LAYER2: %s", primary, layer2)
     log.info("recipients: %s", ", ".join(RECIPIENTS))
-    email_ok = False
-    try:
-        email_ok = send_email()
-    except Exception as ex:
-        log.error("EMAIL ERROR (unhandled): %s", ex)
+
+    # Idempotent send (2026-08-04): this job can legitimately run more than once
+    # on the same trading day - a GitHub Actions cron that fires late alongside
+    # dashboard-watchdog.yml's recovery re-trigger, or a manual re-run - and
+    # without this guard that means a second, duplicate email. email_sent_date
+    # only advances on a CONFIRMED successful send, so a real failure earlier
+    # today still gets retried normally by the next run.
+    _today_iso = ET_TODAY.isoformat()
+    _already_sent_today = CACHE.get("email_sent_date") == _today_iso
+    if _already_sent_today:
+        log.info("EMAIL SKIPPED: already sent successfully today (%s) - treating this "
+                 "run as a duplicate trigger, not re-sending.", _today_iso)
+        email_ok = True
+    else:
+        email_ok = False
+        try:
+            email_ok = send_email()
+        except Exception as ex:
+            log.error("EMAIL ERROR (unhandled): %s", ex)
+        if email_ok:
+            CACHE.set("email_sent_date", _today_iso, RUN_TS)
+
     CACHE.save()
     log.info("Run complete - %d/%d signals retrieved, email sent: %s",
              TILES_WITH_DATA, TOTAL_TILES, "YES" if email_ok else "NO")
