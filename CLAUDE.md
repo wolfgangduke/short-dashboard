@@ -135,20 +135,55 @@ of the 19 numbered tiles:
    52-week high.
 
 `layer2` fires `"ENTRY SIGNAL - early/low-conviction (...)"` when **≥2 of the
-3** are true **and** the calendar is clear — the clear-check is a substring
-test on tile 12's combined flag text for `"in 0d"`/`"in 1d"`/`"in 2d"`, so it
-covers **both** an imminent FOMC and an imminent OpEx (only at the 0–2 day
-edge, not the full 10-day OpEx window). Otherwise `layer2` stays `"WAIT"`.
+3** are true **and** the calendar is clear **and** the trend-regime gate below
+does not hold it — the clear-check is a substring test on tile 12's combined
+flag text for `"in 0d"`/`"in 1d"`/`"in 2d"`, so it covers **both** an imminent
+FOMC and an imminent OpEx (only at the 0–2 day edge, not the full 10-day OpEx
+window). Otherwise `layer2` stays `"WAIT"`.
 
-**Discrepancy flagged, not silently resolved:** the code has exactly **two**
-literal `layer2` states — `"WAIT"` (default) and `"ENTRY SIGNAL - ..."`. There
-is **no** distinct `"CALENDAR GATE"` verdict string for Layer-2 in this
-codebase — a near-term FOMC/OpEx event just leaves `layer2` at `"WAIT"`
-without a separate label. The three-verdict framing (ENTRY SIGNAL / WAIT /
-CALENDAR GATE) described in the global `macro-dashboard` skill belongs to a
-*different* system — the ad-hoc 18-point "SHORT" chat trigger — not to this
-repo's coded verdict engine. Don't conflate the two when documenting or
-extending either one.
+### Layer-2 TREND-REGIME GATE (added 2026-08-04)
+`_l2_uptrend_block = (spx_above_200dma is True) and (spx_above_10mema is True)`.
+When **both** trend filters confirm an intact uptrend, Layer-2 **cannot** fire
+ENTRY no matter how many of its 3 inputs are lit; it renders
+`"WAIT - Layer-2 N/3 met (...) but HELD: uptrend intact ..."` instead, which
+still names what fired for the record but never reads as a trade instruction.
+
+**Why:** per `backtest.py` the only Layer-2 input with genuine short-side edge
+is vol expansion, and that edge exists **only within a downtrend**. The
+realized-vol calc (`_rms` of daily returns, `short_dashboard.py:1403-1410`) is
+**direction-agnostic** — a sharp melt-UP trips it identically to a breakdown.
+Before this gate, 2026-08-03 and 2026-08-04 both produced
+`"ENTRY SIGNAL - probe size"` (starter short) while SPX was above both trend
+filters and accelerating to new highs (SPY 747 → 771, +1.80% in a session,
+R:R 0.0) — the proxy firing squarely outside the only regime it was validated
+in. `initiate_short` was correctly `False` throughout via the separate 200DMA
+hard gate (`short_dashboard.py:1466-1469`); it was Layer-2 alone that was
+mis-calling.
+
+**Deliberately requires BOTH confirmed `True`** (not `None`): unknown trend
+data leaves prior behavior untouched rather than silently suppressing signals
+on a data outage. Regression-tested in `test_harness.py` SCENARIO B2 (3/3
+inputs lit in a confirmed uptrend → must render WAIT, and the plain-English
+summary must not say "starter").
+
+**Known tension, not yet resolved:** `mcclellan_divergence` (input #3) requires
+SPX to be *within 2% of its 52-week high* by construction, so this gate makes
+that input nearly unable to contribute — a breadth-divergence top-call now
+mostly can't fire until price has already broken trend. That is the intended
+conservative bias for now (the backtest found the trend-regime core has no
+standalone edge, so acting early on divergence alone was never validated
+either), but if the ledger later shows real edge in pre-breakdown divergence,
+this is the knob to revisit.
+
+**Discrepancy flagged, not silently resolved:** the code now has **three**
+literal `layer2` shapes — `"WAIT"` (default), `"WAIT - Layer-2 N/3 met ... HELD"`
+(trend-regime hold, added 2026-08-04), and `"ENTRY SIGNAL - ..."`. There is
+still **no** distinct `"CALENDAR GATE"` verdict string — a near-term FOMC/OpEx
+event just leaves `layer2` at the plain `"WAIT"` without a separate label. The
+three-verdict framing (ENTRY SIGNAL / WAIT / CALENDAR GATE) described in the
+global `macro-dashboard` skill belongs to a *different* system — the ad-hoc
+18-point "SHORT" chat trigger — not to this repo's coded verdict engine. Don't
+conflate the two when documenting or extending either one.
 
 **PRE-ALERT** (`short_dashboard.py:1483-1505`) is a separate, informational-only
 early-warning tier *below* Layer-2 — it never gates INITIATE and never affects
