@@ -2263,17 +2263,41 @@ if __name__ == "__main__":
     log.info("PRIMARY: %s | LAYER2: %s", primary, layer2)
     log.info("recipients: %s", ", ".join(RECIPIENTS))
 
-    # Idempotent send (2026-08-04): this job can legitimately run more than once
-    # on the same trading day - a GitHub Actions cron that fires late alongside
-    # dashboard-watchdog.yml's recovery re-trigger, or a manual re-run - and
-    # without this guard that means a second, duplicate email. email_sent_date
-    # only advances on a CONFIRMED successful send, so a real failure earlier
-    # today still gets retried normally by the next run.
-    _today_iso = ET_TODAY.isoformat()
-    _already_sent_today = CACHE.get("email_sent_date") == _today_iso
-    if _already_sent_today:
-        log.info("EMAIL SKIPPED: already sent successfully today (%s) - treating this "
-                 "run as a duplicate trigger, not re-sending.", _today_iso)
+    # Idempotent send (2026-08-04, re-fixed 2026-08-06): this job can legitimately
+    # run more than once on the same trading day - a GitHub Actions cron that
+    # fires late alongside dashboard-watchdog.yml's recovery re-trigger, or a
+    # manual re-run shortly after - and without this guard that means a second,
+    # duplicate email close together in time.
+    #
+    # BUG (2026-08-05, incident): the original guard keyed on the ET calendar
+    # date alone (email_sent_date == today). A manual workflow_dispatch test
+    # run at ~02:47 ET that morning sent successfully and set that flag for
+    # the whole ET day; the real close-of-day scheduled run ~16 hours later
+    # (~18:16 ET) saw the SAME date already marked sent and silently skipped
+    # the actual daily email -- while still logging "email sent: YES" and
+    # exiting 0, so dashboard-watchdog.yml's success check never caught it.
+    #
+    # Fix: dedup on a TIME WINDOW (email_sent_ts, not email_sent_date). Only
+    # skip if a successful send happened within the last DEDUP_WINDOW_HOURS --
+    # comfortably covers the late-cron-on-top-of-watchdog-recovery scenario
+    # this guard exists for (observed gap: well under 1 hour in practice),
+    # while no longer treating an early-morning test run as covering the
+    # evening's real send.
+    DEDUP_WINDOW_HOURS = 4
+    _sent_ts_raw = CACHE.get("email_sent_ts")
+    _already_sent_recently = False
+    if _sent_ts_raw:
+        try:
+            _sent_ts = datetime.datetime.fromisoformat(_sent_ts_raw)
+            _elapsed_hrs = (_utcnow() - _sent_ts).total_seconds() / 3600.0
+            _already_sent_recently = 0 <= _elapsed_hrs < DEDUP_WINDOW_HOURS
+        except Exception as ex:
+            log.warning("email dedup: could not parse cached email_sent_ts %r (%s); "
+                        "not blocking the send", _sent_ts_raw, ex)
+    if _already_sent_recently:
+        log.info("EMAIL SKIPPED: already sent successfully %.1fh ago (within the "
+                 "%dh dedup window) - treating this run as a duplicate trigger, "
+                 "not re-sending.", _elapsed_hrs, DEDUP_WINDOW_HOURS)
         email_ok = True
     else:
         email_ok = False
@@ -2282,7 +2306,7 @@ if __name__ == "__main__":
         except Exception as ex:
             log.error("EMAIL ERROR (unhandled): %s", ex)
         if email_ok:
-            CACHE.set("email_sent_date", _today_iso, RUN_TS)
+            CACHE.set("email_sent_ts", RUN_TS, RUN_TS)
 
     CACHE.save()
     log.info("Run complete - %d/%d signals retrieved, email sent: %s",
