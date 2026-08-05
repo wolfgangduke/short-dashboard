@@ -12,8 +12,21 @@ support for a discretionary short/crash call — NOT an auto-trader. It never
 places trades or moves money.
 
 ## How it runs
-- **GitHub Actions cron** (`.github/workflows/dashboard.yml`): `cron: '17 22 * * 1-5'`
-  = 22:17 UTC, Monday–Friday (~5:17pm ET), `ubuntu-latest`, `timeout-minutes: 10`.
+- **GitHub Actions cron** (`.github/workflows/dashboard.yml`), `ubuntu-latest`,
+  `timeout-minutes: 10`. Target is **17:03 ET, Monday–Friday — 1 hour after the
+  16:00 ET NYSE/S&P 500 close** (changed 2026-08-05 from a single fixed 22:17
+  UTC cron, which drifted between ~5:17pm and ~6:17pm ET depending on the
+  season). Since GitHub cron is always UTC and never shifts for DST, this is
+  now **two** schedule entries covering the two halves of the year:
+  `cron: '3 21 * 3-10 1-5'` (EDT, Mar–Oct, 21:03 UTC = 17:03 ET) and
+  `cron: '3 22 * 11,12,1,2 1-5'` (EST, Nov–Feb, 22:03 UTC = 17:03 ET). Split by
+  whole months since cron can't express the exact DST-transition Sunday, so
+  there's ~1 week around actual mid-March DST start where it fires an hour
+  early (16:03 ET) — still after close, just not the full 1hr-post-close
+  target. See the workflow file's header comment for the full rationale.
+  **Caveat:** GitHub does not guarantee scheduled workflows fire at the exact
+  configured minute — runs have been observed firing up to ~1hr late during
+  busy periods, a platform queuing behavior outside this repo's control.
   Also runnable by hand from the Actions tab ("Run workflow" / `workflow_dispatch`).
 - The job runs the script, which emails the dashboard, then persists `state.json`
   (last-known-value cache + signal ledger) to a **dedicated `state` branch** via
@@ -298,8 +311,11 @@ track record began 2026-07-08. Fully fail-safe (wrapped in try/except).
   block didn't map this secret at all, so `cfg("HEALTHCHECK_URL")` would
   always read empty in Actions even after the secret was added; local `.env`
   fallback was unaffected). To activate: create a check at healthchecks.io
-  (cron `17 22 * * 1-5`, UTC, ~1h grace), add an alert channel, and put its
-  ping URL in the `HEALTHCHECK_URL` secret — the workflow wiring is done.
+  (schedule to match the two-cron split above — 21:03 UTC Mar-Oct / 22:03 UTC
+  Nov-Feb, Mon-Fri — or just use a simple ~24h period with ~1-2h grace since
+  precise-schedule checks add complexity for little benefit here), add an
+  alert channel, and put its ping URL in the `HEALTHCHECK_URL` secret — the
+  workflow wiring is done.
 
 ## Conventions (Bryan's coding rules — follow these)
 - **Zero third-party deps** — stdlib/urllib only.

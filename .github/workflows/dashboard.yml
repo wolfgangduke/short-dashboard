@@ -3,10 +3,28 @@ name: MacroSage SHORT dashboard
 # ---------------------------------------------------------------------------
 # Triggers
 #   * workflow_dispatch: lets you run it on demand from the Actions tab.
-#   * schedule: 22:17 UTC (cron '17 22'), Monday-Friday. 22:17 UTC is ~17:17-18:17 New York
-#     time (after the 16:00 US market close, in both winter EST and summer EDT)
-#     and ~06:00 the next morning in Perth (AWST = UTC+8). Running Mon-Fri UTC
-#     lines up with US trading days. GitHub cron is ALWAYS in UTC.
+#   * schedule: target is 17:03 New York time, Monday-Friday -- 1 hour after
+#     the 16:00 ET NYSE/S&P 500 close (2026-08-05: changed from the old fixed
+#     22:17 UTC, which was ~17:17-18:17 ET depending on the season and drifted
+#     an hour off "1hr post-close" for half the year). GitHub cron is ALWAYS
+#     UTC and NEVER shifts for DST, so a single cron line can't track a fixed
+#     US-Eastern clock time year-round -- two entries below cover the two
+#     halves of the year instead:
+#       - EDT (UTC-4, roughly mid-Mar to early-Nov): 17:03 ET = 21:03 UTC
+#       - EST (UTC-5, roughly early-Nov to mid-Mar): 17:03 ET = 22:03 UTC
+#     Split by whole months (EDT: Mar-Oct, EST: Nov-Feb) since cron can't
+#     express the exact DST transition Sunday -- this leaves ~1 week around
+#     the actual mid-March DST start where the EDT entry fires an hour EARLY
+#     (16:03 ET instead of 17:03 ET), still safely after the 16:00 close, but
+#     not the full 1hr-post-close target. The :03 offset (not :00) is
+#     GitHub's own advice to dodge top-of-the-hour scheduling demand.
+#     NOTE: GitHub does not guarantee scheduled workflows fire at the exact
+#     configured minute -- runs in this repo have been observed firing up to
+#     ~1hr after the configured time during busy periods, which is a platform
+#     queuing behavior, not something this workflow can control. If delivery
+#     keeps landing meaningfully later than 17:03 ET after this change, that's
+#     the next thing to investigate (the HEALTHCHECK_URL heartbeat, once
+#     activated, would surface a pattern here).
 # ---------------------------------------------------------------------------
 on:
   workflow_dispatch:
@@ -16,7 +34,8 @@ on:
         type: boolean
         default: false
   schedule:
-    - cron: '17 22 * * 1-5'
+    - cron: '3 21 * 3-10 1-5'      # EDT (Mar-Oct): 17:03 ET
+    - cron: '3 22 * 11,12,1,2 1-5' # EST (Nov-Feb): 17:03 ET
 
 # Allow the run to push state.json (last-known-value cache + ledger) to the
 # dedicated 'state' branch. main is never written by this workflow.
