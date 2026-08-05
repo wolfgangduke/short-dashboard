@@ -263,6 +263,19 @@ discretionary rule for Bryan to apply by hand, not a coded gate.
 - Includes a plain-English "what to do" summary, a "why these metrics" legend,
   and the interactive HTML report as an attachment.
 - Exit code is red on email-send failure so Actions marks the run failed.
+- **Idempotent send** (`short_dashboard.py`, `if __name__ == "__main__":` block):
+  a successful send is deduped against `email_sent_ts` (cache), skipping a
+  re-send only if the last successful send was **within the last 4 hours**
+  (`DEDUP_WINDOW_HOURS`) — covers a late cron firing on top of
+  `dashboard-watchdog.yml`'s ~45-min-later recovery re-trigger. **Fixed
+  2026-08-06** after an incident where the earlier version deduped on the ET
+  *calendar date* alone: a manual test run at ~2:47am ET sent successfully and
+  blocked that whole day's real ~6pm ET send, 16 hours later, while still
+  reporting "email sent: YES" and exit 0 — so the watchdog (which only checks
+  GitHub Actions conclusion, not whether an email actually went out) never
+  caught it either. This code path is under `if __name__ == "__main__":`,
+  which `test_harness.py`'s `runpy.run_path()` intentionally never executes —
+  not covered by the automated suite, verified manually instead (see PR).
 
 ## KNOWN ISSUE — flagged 2026-07-22, RESOLVED same day (root cause: Gmail categorization, not code)
 Manually triggered `workflow_dispatch` run #106 (commit d93259e, branch
