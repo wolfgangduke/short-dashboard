@@ -231,6 +231,41 @@ htmlB = gB["build_html"]()
 check(">WATCHING<" in htmlB, "email banner shows WATCHING")
 check(">CRASH ALERT<" not in htmlB, "banner does NOT show the CRASH ALERT red pill")
 check(gB["catalyst_auto"] is False, "catalyst auto off at a fresh high (not a breakdown)")
+# Trend-regime gate (2026-08-04): in a confirmed uptrend Layer-2 must never call
+# for a starter short, however many of its 2-of-3 inputs are lit. Guards the
+# real 2026-08-03/04 regression where ENTRY fired with SPX ripping to new highs.
+if gB["spx_above_200dma"] is True and gB["spx_above_10mema"] is True:
+    check(not gB["layer2"].startswith("ENTRY SIGNAL"),
+          "Layer-2 does NOT fire ENTRY in a confirmed uptrend (got: %s)" % gB["layer2"][:60])
+
+print("=" * 70)
+print("SCENARIO B2: 2-of-3 Layer-2 inputs LIT but SPX in a confirmed uptrend")
+print("             -> ENTRY must be HELD (the 2026-08-03/04 regression)")
+print("=" * 70)
+# Ascending price (above 200DMA and 10M EMA) while VIX9D inverts (gamma_flip)
+# and the VIX/VIX3M curve races toward inversion (ts_accelerating) = 2 lit
+# inputs that, before this gate, produced "ENTRY SIGNAL - probe size" at a
+# fresh market high. Must now render WAIT.
+gB2 = run_scenario("uptrend_l2", ascending(350, 500.5, 251), 500.0,
+                   {"dual_red_streak": {"value": 3, "ts": "2026-07-01T00:00:00"}},
+                   extra=[("yahoo", "chart/%5EVIX9D?range=6mo",
+                           yahoo_daily([30.0] * 126)),
+                          ("yahoo", "chart/%5EVIX?range=6mo",
+                           yahoo_daily([20.0] * 120 + [21.0, 23.0, 25.0, 27.0, 29.0])),
+                          ("yahoo", "chart/%5EVIX3M?range=6mo",
+                           yahoo_daily([25.0] * 125))])
+check(gB2["spx_above_200dma"] is True, "SPX confirmed ABOVE 200DMA")
+check(gB2["spx_above_10mema"] is True, "SPX confirmed ABOVE 10M EMA")
+check(gB2["_l2_signals"] >= 2,
+      "2-of-3 Layer-2 inputs genuinely lit (%d/3)" % gB2["_l2_signals"])
+check(not gB2["layer2"].startswith("ENTRY SIGNAL"),
+      "no starter short called in an uptrend (got: %s)" % gB2["layer2"][:70])
+check(gB2["layer2"].startswith("WAIT - Layer-2"),
+      "held verdict names what fired: %s" % gB2["layer2"][:70])
+check("HELD" in gB2["layer2"], "verdict text explains the hold")
+# The plain-English summary must not tell Bryan to open a starter position.
+check("starter" not in gB2["layman"].lower(),
+      "plain-English summary does NOT recommend a starter short")
 
 print("=" * 70)
 print("SCENARIO C: streak only 1/3 -> must stay WATCHING with streak blocker")

@@ -1775,7 +1775,16 @@ primary = head + _notes_tail
 # pre-breakdown version of the same curve information.
 _l2_signals = sum([gamma_flip, ts_accelerating, mcclellan_divergence])
 _cal_clear = not any(x in cal_sub for x in ("in 0d", "in 1d", "in 2d"))
-if _l2_signals >= 2 and _cal_clear:
+# TREND-REGIME GATE (2026-08-04): Layer-2 must not call for a starter short while
+# BOTH trend filters confirm an intact uptrend. Per backtest.py the one Layer-2
+# input with genuine short-side edge -- vol expansion -- only has that edge
+# *within a downtrend*; the realized-vol calc (_rms of daily returns) is
+# direction-agnostic, so a sharp melt-UP trips it identically to a breakdown.
+# Firing ENTRY with SPX above both its 200DMA and 10-month EMA applies that proxy
+# outside the only regime it was ever validated in. Requires BOTH confirmed True
+# (not None) to suppress: unknown trend data leaves prior behavior untouched.
+_l2_uptrend_block = (spx_above_200dma is True) and (spx_above_10mema is True)
+if _l2_signals >= 2 and _cal_clear and not _l2_uptrend_block:
     _l2_names = []
     if gamma_flip: _l2_names.append(
         "vol expansion" if vol_expansion else
@@ -1791,6 +1800,20 @@ if _l2_signals >= 2 and _cal_clear:
         ", ".join(_l2_names),
         ("; caveat: " + "; ".join(_why_low)) if _why_low else ""))
     log.info("Layer2 ENTRY signal fired: %s", layer2)
+elif _l2_signals >= 2 and _cal_clear and _l2_uptrend_block:
+    # 2-of-3 met but the regime says don't act. Surfaced as WAIT (never ENTRY) so
+    # the plain-English summary and the ledger both record "no trade today",
+    # while still naming what fired for the record.
+    _l2_held = []
+    if gamma_flip: _l2_held.append(
+        "vol expansion" if vol_expansion else
+        ("VIX9D inversion" if vix9d_inversion else "GEX flip (manual)"))
+    if ts_accelerating: _l2_held.append("TS flattening accel")
+    if mcclellan_divergence: _l2_held.append("McClellan divergence")
+    layer2 = ("WAIT - Layer-2 %d/3 met (%s) but HELD: uptrend intact "
+              "(SPX above 200DMA and 10M EMA) - vol-expansion edge is "
+              "downtrend-only per backtest" % (_l2_signals, ", ".join(_l2_held)))
+    log.info("Layer2 ENTRY suppressed by trend-regime gate: %s", layer2)
 # ---- Plain-English "what to do" summary (deterministic; reads existing verdict vars only) ----
 _ll = (layer2 or "")
 if initiate_short:
@@ -2239,11 +2262,28 @@ if __name__ == "__main__":
              spx_card, vix_card, sp_card, br_card)
     log.info("PRIMARY: %s | LAYER2: %s", primary, layer2)
     log.info("recipients: %s", ", ".join(RECIPIENTS))
-    email_ok = False
-    try:
-        email_ok = send_email()
-    except Exception as ex:
-        log.error("EMAIL ERROR (unhandled): %s", ex)
+
+    # Idempotent send (2026-08-04): this job can legitimately run more than once
+    # on the same trading day - a GitHub Actions cron that fires late alongside
+    # dashboard-watchdog.yml's recovery re-trigger, or a manual re-run - and
+    # without this guard that means a second, duplicate email. email_sent_date
+    # only advances on a CONFIRMED successful send, so a real failure earlier
+    # today still gets retried normally by the next run.
+    _today_iso = ET_TODAY.isoformat()
+    _already_sent_today = CACHE.get("email_sent_date") == _today_iso
+    if _already_sent_today:
+        log.info("EMAIL SKIPPED: already sent successfully today (%s) - treating this "
+                 "run as a duplicate trigger, not re-sending.", _today_iso)
+        email_ok = True
+    else:
+        email_ok = False
+        try:
+            email_ok = send_email()
+        except Exception as ex:
+            log.error("EMAIL ERROR (unhandled): %s", ex)
+        if email_ok:
+            CACHE.set("email_sent_date", _today_iso, RUN_TS)
+
     CACHE.save()
     log.info("Run complete - %d/%d signals retrieved, email sent: %s",
              TILES_WITH_DATA, TOTAL_TILES, "YES" if email_ok else "NO")
