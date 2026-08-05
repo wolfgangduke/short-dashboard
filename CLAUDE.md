@@ -12,8 +12,21 @@ support for a discretionary short/crash call — NOT an auto-trader. It never
 places trades or moves money.
 
 ## How it runs
-- **GitHub Actions cron** (`.github/workflows/dashboard.yml`): `cron: '17 22 * * 1-5'`
-  = 22:17 UTC, Monday–Friday (~5:17pm ET), `ubuntu-latest`, `timeout-minutes: 10`.
+- **GitHub Actions cron** (`.github/workflows/dashboard.yml`), `ubuntu-latest`,
+  `timeout-minutes: 10`. Target is **17:03 ET, Monday–Friday — 1 hour after the
+  16:00 ET NYSE/S&P 500 close** (changed 2026-08-05 from a single fixed 22:17
+  UTC cron, which drifted between ~5:17pm and ~6:17pm ET depending on the
+  season). Since GitHub cron is always UTC and never shifts for DST, this is
+  now **two** schedule entries covering the two halves of the year:
+  `cron: '3 21 * 3-10 1-5'` (EDT, Mar–Oct, 21:03 UTC = 17:03 ET) and
+  `cron: '3 22 * 11,12,1,2 1-5'` (EST, Nov–Feb, 22:03 UTC = 17:03 ET). Split by
+  whole months since cron can't express the exact DST-transition Sunday, so
+  there's ~1 week around actual mid-March DST start where it fires an hour
+  early (16:03 ET) — still after close, just not the full 1hr-post-close
+  target. See the workflow file's header comment for the full rationale.
+  **Caveat:** GitHub does not guarantee scheduled workflows fire at the exact
+  configured minute — runs have been observed firing up to ~1hr late during
+  busy periods, a platform queuing behavior outside this repo's control.
   Also runnable by hand from the Actions tab ("Run workflow" / `workflow_dispatch`).
 - The job runs the script, which emails the dashboard, then persists `state.json`
   (last-known-value cache + signal ledger) to a **dedicated `state` branch** via
@@ -272,13 +285,15 @@ automated self-sent HTML email with an attachment, landing it outside the
 Primary tab view even though it's technically in INBOX. Confirm by checking
 those tabs or searching "MacroSage" directly in Gmail.
 
-**Unrelated doc-accuracy note found while investigating (still open, low
-priority):** `dashboard.yml` maps `FRED_API_KEY: ${{ secrets.FRED }}` — the
-real GitHub secret is named `FRED`, not `FRED_API_KEY` as the Secrets
-section below implies. Confirmed this isn't broken (live FRED data fetched
-fine in run #106) — just a stale doc vs. the real secret name. Fix (either is
-fine, not yet done): rename the GitHub secret to `FRED_API_KEY` and drop the
-workflow's env mapping, or rename the workflow's env var / `cfg()` key to `FRED`.
+**Unrelated doc-accuracy note found while investigating — RESOLVED 2026-08-03:**
+`dashboard.yml` mapped `FRED_API_KEY: ${{ secrets.FRED }}` while the script read
+`cfg("FRED_API_KEY")` — the real GitHub secret is named `FRED`, not
+`FRED_API_KEY`. Never broken (live FRED data fetched fine in run #106), just a
+naming mismatch. Fixed by renaming the workflow's env var and the script's
+`cfg()` key to `FRED` throughout (rather than renaming the GitHub secret
+itself) — no GitHub secret rotation needed. **If you have a local `.env` with
+`FRED_API_KEY=...`, rename that key to `FRED` too** — `.env` is gitignored so
+this doc change doesn't touch it for you.
 
 Not related to the tile 19 (Long-End Duration Stress) change on
 `feat/30y-duration-stress` — filed separately on its own branch rather than
@@ -308,9 +323,9 @@ track record began 2026-07-08. Fully fail-safe (wrapped in try/except).
 
 ## Secrets (GitHub → Settings → Secrets and variables → Actions)
 - `FMP_API_KEY` — still primary for spot quotes (free fallbacks behind it).
-- `FRED_API_KEY` in the script / `cfg("FRED_API_KEY")` — Treasury yields, net
-  liquidity, credit, fiscal. **The actual GitHub secret is named `FRED`, not
-  `FRED_API_KEY`** — see the KNOWN ISSUE note above (still open, low priority).
+- `FRED` in the script / `cfg("FRED")` — Treasury yields, net liquidity,
+  credit, fiscal. GitHub secret name and code now match (fixed 2026-08-03 —
+  see the KNOWN ISSUE note above).
 - `GMAIL_USER`, `GMAIL_APP_PASSWORD` — Gmail SMTP send (app password, 2FA on).
 - `MAIL_TO` — Cc recipients (Richard).
 - `HEALTHCHECK_URL` — OPTIONAL heartbeat (see below). Not yet set.
@@ -318,9 +333,6 @@ track record began 2026-07-08. Fully fail-safe (wrapped in try/except).
   `RR_STOP`, `RR_TARGET`, `FMP_FORCE_FAIL` (test-forces the FMP fallback path).
 
 ## Known issues
-- **`FRED_API_KEY` / secret-name mismatch** — see the KNOWN ISSUE section
-  above (still open, low priority; the GitHub secret is literally named
-  `FRED`, not `FRED_API_KEY`).
 - **Layer-2 has no coded `"CALENDAR GATE"` verdict** — see the discrepancy
   note under Layer-2 above. Don't assume this repo's Layer-2 has a third
   verdict state; it doesn't, today.
@@ -331,13 +343,17 @@ track record began 2026-07-08. Fully fail-safe (wrapped in try/except).
   not firing at all; the (inactive) healthchecks.io heartbeat below would
   catch both plus anything the watchdog itself misses.
 - **`dashboard-watchdog.yml`** (added 2026-08-04, GitHub-only, no external
-  account needed): runs `00 23 * * 1-5` (~45min after dashboard.yml's 22:17
-  UTC window), checks via `gh run list` whether a `schedule`-triggered
-  `dashboard.yml` run succeeded today, and if not, re-triggers it via
-  `workflow_dispatch` and emails a heads-up (`watchdog_alert.py`). Built
-  after dashboard.yml's Monday 8/3 cron silently didn't fire (no error
-  anywhere — a known GitHub Actions best-effort-scheduling gap, not a bug in
-  this repo's config).
+  account needed): runs `00 23 * * 1-5` (23:00 UTC), checks via `gh run list`
+  whether a `schedule`-triggered `dashboard.yml` run succeeded today, and if
+  not, re-triggers it via `workflow_dispatch` and emails a heads-up
+  (`watchdog_alert.py`). Built after dashboard.yml's Monday 8/3 cron silently
+  didn't fire (no error anywhere — a known GitHub Actions best-effort-
+  scheduling gap, not a bug in this repo's config). **Buffer note (2026-08-05):**
+  dashboard.yml's schedule changed from a single fixed 22:17 UTC cron to two
+  DST-aware entries (21:03 UTC Mar-Oct / 22:03 UTC Nov-Feb — see "How it runs"
+  above); the watchdog's fixed 23:00 UTC still runs safely after both (buffer
+  is now ~2hr in EDT months, ~1hr in EST months, vs. the original flat
+  ~45min) — no watchdog change needed, just a wider/uneven margin.
 - The **healthchecks.io heartbeat** code already exists separately (fires
   only if `HEALTHCHECK_URL` is set; pings the URL on success, URL/`/fail` on
   email failure; fail-safe), and `dashboard.yml` now passes
@@ -346,11 +362,14 @@ track record began 2026-07-08. Fully fail-safe (wrapped in try/except).
   secret at all, so `cfg("HEALTHCHECK_URL")` would always read empty in
   Actions even after the secret was added; local `.env` fallback was
   unaffected). Still **not yet activated** — the workflow wiring is done, but
-  it needs an external account: create a check at healthchecks.io (cron
-  `17 22 * * 1-5`, UTC, ~1h grace), add an alert channel, and put its ping
-  URL in the `HEALTHCHECK_URL` secret. This is the more standard
-  dead-man's-switch and would be a good complement to the watchdog above,
-  not a replacement — do both if/when Bryan sets up the account.
+  it needs an external account: create a check at healthchecks.io (schedule
+  to match the two-cron split above — 21:03 UTC Mar-Oct / 22:03 UTC Nov-Feb,
+  Mon-Fri — or just use a simple ~24h period with ~1-2h grace since a
+  precise-schedule check adds complexity for little benefit here), add an
+  alert channel, and put its ping URL in the `HEALTHCHECK_URL` secret. This
+  is the more standard dead-man's-switch and would be a good complement to
+  the watchdog above, not a replacement — do both if/when Bryan sets up the
+  account.
 
 ## Conventions (Bryan's coding rules — follow these)
 - **Zero third-party deps** — stdlib/urllib only.
