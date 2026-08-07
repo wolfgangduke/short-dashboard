@@ -46,7 +46,7 @@ places trades or moves money.
 - `test_harness.py` — verdict-engine test suite (fixtures, no network). Run with `py test_harness.py`; expect `RESULT: ALL CHECKS PASSED`.
 - `sim_drill.py` — escalation-drill simulator. `fmp_client.py` / `run_fmp.py` — FMP helpers/snapshot.
 - `state.json` — last-known-good cache + the signal ledger; committed back each run.
-- `.github/workflows/` — `dashboard.yml` (the daily job), `dashboard-watchdog.yml` (checks the cron actually fired; see Reliability below), `escalation-drill.yml` (manual), `claude.yml` (PR-comment automation, unrelated to scanning).
+- `.github/workflows/` — `dashboard.yml` (the daily job), `dashboard-watchdog.yml` (checks the cron actually fired; see Reliability below), `ci.yml` (runtime-error gate: runs `py_compile` + `test_harness.py` on every PR and on pushes to main), `escalation-drill.yml` (manual), `claude.yml` (PR-comment automation, unrelated to scanning).
 - `watchdog_alert.py` — standalone alert email sent by `dashboard-watchdog.yml`, stdlib only.
 - `reports/` — saved HTML dashboards.
 
@@ -341,7 +341,8 @@ track record began 2026-07-08. Fully fail-safe (wrapped in try/except).
   see the KNOWN ISSUE note above).
 - `GMAIL_USER`, `GMAIL_APP_PASSWORD` — Gmail SMTP send (app password, 2FA on).
 - `MAIL_TO` — Cc recipients (Richard).
-- `HEALTHCHECK_URL` — OPTIONAL heartbeat (see below). Not yet set.
+- `HEALTHCHECK_URL` — heartbeat ping URL (see Reliability below). **Set/activated
+  2026-08-06**; check configured in Simple mode (24h period / 3h grace), not Cron.
 - Optional manual overrides: `GEX_FLIP`, `CATALYST_ON`, `POST_LOSS_DESIZE`,
   `RR_STOP`, `RR_TARGET`, `FMP_FORCE_FAIL` (test-forces the FMP fallback path).
 
@@ -351,10 +352,12 @@ track record began 2026-07-08. Fully fail-safe (wrapped in try/except).
   verdict state; it doesn't, today.
 
 ## Reliability / heartbeat
-- Silent-failure coverage is now three-part: exit-code-red catches a failed
+- Silent-failure coverage is three-part: exit-code-red catches a failed
   email WITHIN a run; `dashboard-watchdog.yml` catches the scheduled trigger
-  not firing at all; the (inactive) healthchecks.io heartbeat below would
-  catch both plus anything the watchdog itself misses.
+  not firing at all; the healthchecks.io heartbeat below catches both plus
+  anything the watchdog itself misses — no longer theoretical, see the
+  2026-08-06 incident below, where it was the only one of the three that
+  caught the failure.
 - **`dashboard-watchdog.yml`** (added 2026-08-04, GitHub-only, no external
   account needed): runs `00 23 * * 1-5` (23:00 UTC), checks via `gh run list`
   whether a `schedule`-triggered `dashboard.yml` run succeeded today, and if
@@ -366,7 +369,10 @@ track record began 2026-07-08. Fully fail-safe (wrapped in try/except).
   DST-aware entries (21:03 UTC Mar-Oct / 22:03 UTC Nov-Feb — see "How it runs"
   above); the watchdog's fixed 23:00 UTC still runs safely after both (buffer
   is now ~2hr in EDT months, ~1hr in EST months, vs. the original flat
-  ~45min) — no watchdog change needed, just a wider/uneven margin.
+  ~45min) — no watchdog change needed, just a wider/uneven margin. **Known
+  single point of failure:** the watchdog is itself a GitHub Actions cron, so
+  it shares the same platform-level scheduling risk as the job it's meant to
+  catch (see 2026-08-06 incident below, where both missed on the same day).
 - The **healthchecks.io heartbeat** code already exists separately (fires
   only if `HEALTHCHECK_URL` is set; pings the URL on success, URL/`/fail` on
   email failure; fail-safe), and `dashboard.yml` now passes
@@ -374,15 +380,28 @@ track record began 2026-07-08. Fully fail-safe (wrapped in try/except).
   (fixed 2026-08-03 — previously the workflow's `env:` block didn't map this
   secret at all, so `cfg("HEALTHCHECK_URL")` would always read empty in
   Actions even after the secret was added; local `.env` fallback was
-  unaffected). Still **not yet activated** — the workflow wiring is done, but
-  it needs an external account: create a check at healthchecks.io (schedule
-  to match the two-cron split above — 21:03 UTC Mar-Oct / 22:03 UTC Nov-Feb,
-  Mon-Fri — or just use a simple ~24h period with ~1-2h grace since a
-  precise-schedule check adds complexity for little benefit here), add an
-  alert channel, and put its ping URL in the `HEALTHCHECK_URL` secret. This
-  is the more standard dead-man's-switch and would be a good complement to
-  the watchdog above, not a replacement — do both if/when Bryan sets up the
-  account.
+  unaffected). **Activated 2026-08-06** — the "MacroSage daily" check on
+  healthchecks.io is configured in **Simple** schedule mode (24h period / 3h
+  grace), not Cron mode. It was initially set up with a Cron schedule
+  matching the old single 22:17 UTC cron, which went stale the moment the
+  two-cron DST split shipped (2026-08-05) since healthchecks.io only supports
+  one schedule per check; switched to Simple mode instead of trying to force
+  a single cron expression to cover both DST halves of the year — deliberately
+  loose (period+grace) since the goal is "did today's ping arrive at all," not
+  minute-precision.
+
+**Incident 2026-08-06 — heartbeat caught what both internal layers missed:**
+Both `dashboard.yml`'s cron (target 21:03 UTC) and `dashboard-watchdog.yml`'s
+cron (target 23:00 UTC) silently failed to fire for 2+ hours — a genuine
+GitHub Actions scheduling outage, not a code or config bug (both workflows
+showed `state: active` via the API throughout). The healthchecks.io heartbeat
+caught it — a "DOWN | MacroSage daily" alert arrived at 23:17 UTC, external to
+GitHub and therefore not subject to the same platform issue as the watchdog.
+Recovered via a manual `workflow_dispatch` trigger at 23:26 UTC; the real
+email's delivery was confirmed directly in Gmail (not just the Actions log
+reporting success), and healthchecks.io sent the "UP" recovery alert 10m15s
+later. This is the first time the watchdog itself has been observed missing,
+and it's the exact scenario the three-layer design (see above) exists for.
 
 ## Conventions (Bryan's coding rules — follow these)
 - **Zero third-party deps** — stdlib/urllib only.
@@ -401,7 +420,10 @@ Prioritised improvements (do as small, independently-verified PRs, never one big
 3. **#4 Email cadence** — send the full email only on a state change / threshold
    cross, weekly digest otherwise, plus a "what changed since yesterday" line.
    Needs Bryan's rules on what counts as a state change.
-4. **Heartbeat activation** — Bryan adds the healthchecks.io check + secret.
+4. **Done 2026-08-06** — Heartbeat activated (healthchecks.io, Simple schedule:
+   24h period / 3h grace). Already proved its worth the same day, catching a
+   real multi-hour GitHub Actions scheduling outage that both `dashboard.yml`
+   and `dashboard-watchdog.yml` silently missed — see the Reliability section.
 5. Signal rework — **PARTIALLY DONE 2026-08-03** (user-directed "optimise for
    correctness"): VIX backwardation reclassified as a bounce/exit cue (tile 17
    amber not red; Layer-2 input #2 swapped to `ts_accelerating`) and the credit
