@@ -974,6 +974,43 @@ if netliq is None:
 netliq_dir = None
 if netliq:
     netliq_dir = "declining" if netliq[0] < netliq[1] else "rising"
+# ---- net-liquidity 13-week RoC - MEASUREMENT ONLY (roadmap #5, 2026-08-07) --
+# Computes the dated, date-aligned 13-week change in net liquidity and logs /
+# displays it on tile 8. Deliberately does NOT feed netliq_decl or the
+# dual-red gate yet: per the roadmap, switching the gate from week-over-week
+# to a 13-week RoC needs ledger calibration first, so this ships the
+# measurement to calibrate against, not the rule change. Fully fail-safe.
+netliq_13w_delta = None
+try:
+    _wd = _fred_series_dated("WALCL", 16)      # weekly -> 16 obs spans >13 weeks
+    _td = _fred_series_dated("WTREGEN", 100)   # daily
+    _rd = _fred_series_dated("RRPONTSYD", 100) # daily
+    if _wd and _td and _rd and len(_wd) >= 2:
+        import datetime as _nl_dt
+        def _nl_on_or_before(series, target_date):
+            # series is newest-first (date_str, value); first obs <= target wins
+            for _d, _v in series:
+                if _d <= target_date:
+                    return _v
+            return None
+        _d0 = _wd[0][0]
+        _target = (_nl_dt.date.fromisoformat(_d0)
+                   - _nl_dt.timedelta(days=91)).isoformat()
+        _w_then = next(((_d, _v) for _d, _v in _wd if _d <= _target), None)
+        if _w_then:
+            _t0, _r0 = _nl_on_or_before(_td, _d0), _nl_on_or_before(_rd, _d0)
+            _t1 = _nl_on_or_before(_td, _w_then[0])
+            _r1 = _nl_on_or_before(_rd, _w_then[0])
+            if None not in (_t0, _r0, _t1, _r1):
+                _nl_now = _wd[0][1] / 1000.0 - _t0 / 1000.0 - _r0
+                _nl_then = _w_then[1] / 1000.0 - _t1 / 1000.0 - _r1
+                if -2000 < _nl_now < 12000 and -2000 < _nl_then < 12000:
+                    netliq_13w_delta = _nl_now - _nl_then
+                    log.info("net liquidity 13w RoC (informational): %+.0f $bn "
+                             "(%s %.0f -> %s %.0f)", netliq_13w_delta,
+                             _w_then[0], _nl_then, _d0, _nl_now)
+except Exception as _nl_ex:
+    log.warning("net liquidity 13w RoC failed (non-fatal, informational only): %s", _nl_ex)
 breadth_red = breadth is not None and breadth < 50
 netliq_decl = netliq_dir == "declining"
 if breadth_red and netliq_decl:
@@ -1572,7 +1609,9 @@ p.append(("7. Market breadth",
           ("%d%% advancing" % breadth) if breadth is not None else "unavailable",
           ("red" if breadth_red else ("green" if breadth is not None else "gray"))))
 p.append(("8. Net liquidity",
-          netliq_dir if netliq_dir else "unavailable",
+          ((netliq_dir + (" | 13w Δ %+.0f$bn (informational)" % netliq_13w_delta
+                          if netliq_13w_delta is not None else ""))
+           if netliq_dir else "unavailable"),
           ("red" if netliq_dir == "declining" else ("green" if netliq_dir == "rising" else "gray"))))
 p.append(("9. Positioning (COT)", cot_sub, cot_col))
 p.append(("10. VVIX divergence", vvix_sub, vvix_col))
@@ -1672,10 +1711,33 @@ tile16_red = p[15][2] == "red"   # AAII Sentiment  (Pt16)
 # genuine high-stress day in the same sizing bucket after removing those two
 # possible reds. (Approximate recalibration - worth confirming vs the ledger.)
 _SIZING_EXCLUDE = {10, 11}   # 0-based: tile 11 (sector rotation), tile 12 (calendar)
-n_stress = sum(1 for i, (_, _, c) in enumerate(p)
-               if c == "red" and i not in _SIZING_EXCLUDE)
-log.info("sizing tally: n_red=%d (all tiles) | n_stress=%d (independent stress, "
-         "excl. calendar-timing + breadth-derived sector)", n_red, n_stress)
+_n_stress_raw = sum(1 for i, (_, _, c) in enumerate(p)
+                    if c == "red" and i not in _SIZING_EXCLUDE)
+# ---- correlated-cluster de-dup (roadmap #5, 2026-08-07) ---------------------
+# Three tile pairs read overlapping information; when BOTH members of a pair
+# are red, the pair contributes ONE unit of stress, not two, so a single
+# underlying condition can't double-inflate sizing:
+#   - tiles 7 & 18: NYSE breadth %% and the RSP/SPY breadth proxy
+#   - tiles 15 & 16: NAAIM and AAII (both contrarian sentiment surveys)
+#   - tiles 3 & 19: 2s10s inversion and 30Y duration stress (both rates)
+# De-dup only ever LOWERS n_stress (fewer inflated reds -> smaller short), so
+# the existing tier boundaries below are kept unchanged - conservative bias.
+_SIZING_CLUSTERS = ((6, 17), (14, 15), (2, 18))   # 0-based pairs
+_cluster_dupes = sum(1 for a, b in _SIZING_CLUSTERS
+                     if p[a][2] == "red" and p[b][2] == "red")
+# ---- vol-expansion downtrend weighting (roadmap #5, 2026-08-07) -------------
+# Per backtest.py the ONE component with genuine short-side edge is realized-
+# vol expansion WITHIN a confirmed downtrend (~61%% right on 5-10d entries).
+# Give exactly that condition one extra unit of stress weight. Requires
+# spx_above_200dma to be a confirmed False - None (unknown trend) earns no
+# bonus, same fail-safe stance as the Layer-2 trend-regime gate; and the
+# direction-agnostic vol calc firing in an UPTREND (melt-up) earns nothing.
+_vol_edge_bonus = 1 if (vol_expansion and spx_above_200dma is False) else 0
+n_stress = _n_stress_raw - _cluster_dupes + _vol_edge_bonus
+log.info("sizing tally: n_red=%d (all tiles) | n_stress=%d (raw %d - %d cluster "
+         "dupe%s + %d vol-edge bonus; excl. calendar-timing + breadth-derived "
+         "sector)", n_red, n_stress, _n_stress_raw, _cluster_dupes,
+         "s" if _cluster_dupes != 1 else "", _vol_edge_bonus)
 # ---- 1. dual-red streak (session-guarded, persisted) ----
 dual_red = bool(breadth_red and netliq_decl)
 _prev_streak = int(CACHE.get("dual_red_streak") or 0)

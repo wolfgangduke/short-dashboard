@@ -55,8 +55,8 @@ places trades or moves money.
 - `test_harness.py` — verdict-engine test suite (fixtures, no network). Run with `py test_harness.py`; expect `RESULT: ALL CHECKS PASSED`.
 - `sim_drill.py` — escalation-drill simulator. `fmp_client.py` / `run_fmp.py` — FMP helpers/snapshot.
 - `state.json` — last-known-good cache + the signal ledger; committed back each run.
-- `.github/workflows/` — `dashboard.yml` (the daily job), `ci.yml` (runs `test_harness.py` on every PR), `escalation-drill.yml` (manual), `claude.yml` (PR-comment automation, unrelated to scanning).
-  - **`dashboard-watchdog.yml` and `watchdog_alert.py` were DELETED 2026-08-06** — replaced by redundant cron entries in `dashboard.yml`. See Reliability below before recreating anything like them.
+- `.github/workflows/` — `dashboard.yml` (the daily job), `ci.yml` (runtime-error gate: runs `py_compile` + `test_harness.py` on every PR and on pushes to main), `escalation-drill.yml` (manual), `claude.yml` (PR-comment automation, unrelated to scanning).
+  - **`dashboard-watchdog.yml` and `watchdog_alert.py` were DELETED 2026-08-07** — the 2026-08-06 outage proved the watchdog shares its target's failure mode, and the now-active healthchecks.io heartbeat covers detection from outside GitHub. See Reliability below before recreating anything like them.
 - `reports/` — saved HTML dashboards.
 
 ## Data sources (all free; FMP still primary but now has fallbacks)
@@ -93,7 +93,7 @@ unavailable (no live value AND no cache).
 | 5 | Commodities (Gold) | FMP quote → Yahoo → Stooq | Informational only, no directional threshold. **green** when `gold_px` is available, **gray** only on genuine fetch failure (no live value and no cache) — fixed 2026-07-31; previously hardcoded gray unconditionally, so it sat in the "No Data" bucket (see Sizing tiers) even on days it had a live price. |
 | 6 | Dollar / FX | FRED `DTWEXBGS` (broad $ index) | red if rising w/w, green if falling, amber cached, gray no data. |
 | 7 | Market breadth | FMP sector snapshot % advancing → WSJ NYSE A/D fallback | **red if <50%** (dual-red input #1), green if ≥50%, gray unavailable. |
-| 8 | Net liquidity | FRED `WALCL` − `WTREGEN` (TGA) − `RRPONTSYD` (RRP), in $T | **red/"declining"** if current < previous (dual-red input #2), green/"rising" else, gray unknown. |
+| 8 | Net liquidity | FRED `WALCL` − `WTREGEN` (TGA) − `RRPONTSYD` (RRP), in $T | **red/"declining"** if current < previous (dual-red input #2), green/"rising" else, gray unknown. **Since 2026-08-07** the sub-text also shows a date-aligned **13-week Δ ($bn), explicitly labelled informational** — it does NOT feed the color or the dual-red gate; it's the measurement phase for the roadmap-#5 RoC recalibration, shipped first so the gate switch can be calibrated against the ledger before it changes behavior. Fully fail-safe (missing/undated data → note simply absent). |
 | 9 | Positioning (COT) | CFTC E-mini S&P COT → Tradingster fallback (if CFTC >10d stale) | green if asset-mgr net long, red if net short. |
 | 10 | VVIX divergence | Yahoo `^VVIX` vs `^VIX` daily % change | red if VVIX +3%+ while VIX ≤+1%, green if VVIX ≤−2%, amber otherwise. |
 | 11 | Sector rotation | **Derived from tile 7**, not independent data | red ("defensive tilt") if breadth red, green ("broad") else. Excluded from the sizing tally for exactly this reason (see Sizing below). One of the two **MAX CONVICTION** legs. |
@@ -237,10 +237,30 @@ to MAX CONVICTION going forward.
 | `FMP_FORCE_FAIL` | Test seam only (`workflow_dispatch` input) — forces the FMP path dead to exercise the Yahoo/Stooq fallback tier. Not a trading override. |
 
 ### Sizing tiers
-Sizing uses `n_stress` (`short_dashboard.py:1621-1635`), **not** the raw
-all-tiles red count (`n_red`, still shown in the email). `n_stress` excludes
-tile 11 (Sector rotation — derived from tile 7, would double-count breadth)
-and tile 12 (Calendar gate — timing, not stress):
+Sizing uses `n_stress`, **not** the raw all-tiles red count (`n_red`, still
+shown in the email). Since 2026-08-07 (roadmap #5) `n_stress` is computed in
+three steps:
+1. **Raw tally** — count red tiles, excluding tile 11 (Sector rotation —
+   derived from tile 7, would double-count breadth) and tile 12 (Calendar
+   gate — timing, not stress).
+2. **Correlated-cluster de-dup** — subtract 1 for each pair where BOTH
+   members are red, so one underlying condition can't double-inflate sizing:
+   breadth (tiles **7 & 18**), sentiment (tiles **15 & 16**), rates (tiles
+   **3 & 19**). De-dup only ever LOWERS `n_stress`, so the tier boundaries
+   below were deliberately left unchanged — conservative bias (max possible
+   `n_stress` from tiles alone drops 17 → 14, exactly the 2.0× cap).
+3. **Vol-expansion downtrend bonus** — add **+1** iff `vol_expansion` is on
+   AND `spx_above_200dma is False` (confirmed downtrend). This is the ONE
+   component `backtest.py` found genuine short-side edge in, and only in that
+   regime; an unknown trend (`None`) earns nothing (same fail-safe stance as
+   the Layer-2 trend gate), and the direction-agnostic vol calc firing in a
+   melt-UP earns nothing.
+
+Regression-tested in `test_harness.py`: the raw−dupes+bonus identity, ≥2
+dupes in scenario A, bonus=0 without vol expansion (A) and in a confirmed
+uptrend (B2), bonus=+1 in scenario D's vol-burst downtrend.
+
+Tiers (unchanged):
 - `n_stress ≥ 14` → **2.0×** (cap)
 - `n_stress ≥ 10` → **1.5×**
 - `n_stress ≥ 6` → **1.0×** (standard)
@@ -275,8 +295,10 @@ discretionary rule for Bryan to apply by hand, not a coded gate.
 - **Idempotent send** (`short_dashboard.py`, `if __name__ == "__main__":` block):
   a successful send is deduped against `email_sent_ts` (cache), skipping a
   re-send only if the last successful send was **within the last 4 hours**
-  (`DEDUP_WINDOW_HOURS`) — covers a late cron firing on top of
-  `dashboard-watchdog.yml`'s ~45-min-later recovery re-trigger. **Fixed
+  (`DEDUP_WINDOW_HOURS`) — this is what makes the backup cron pair safe: the
+  1hr-later fire is an email no-op when the primary already sent. (Until
+  2026-08-07 it covered `dashboard-watchdog.yml`'s recovery re-trigger, same
+  purpose, now-deleted mechanism.) **Fixed
   2026-08-06** after an incident where the earlier version deduped on the ET
   *calendar date* alone: a manual test run at ~2:47am ET sent successfully and
   blocked that whole day's real ~6pm ET send, 16 hours later, while still
@@ -350,7 +372,8 @@ track record began 2026-07-08. Fully fail-safe (wrapped in try/except).
   see the KNOWN ISSUE note above).
 - `GMAIL_USER`, `GMAIL_APP_PASSWORD` — Gmail SMTP send (app password, 2FA on).
 - `MAIL_TO` — Cc recipients (Richard).
-- `HEALTHCHECK_URL` — OPTIONAL heartbeat (see below). Not yet set.
+- `HEALTHCHECK_URL` — heartbeat ping URL (see Reliability below). **Set/activated
+  2026-08-06**; check configured in Simple mode (24h period / 3h grace), not Cron.
 - Optional manual overrides: `GEX_FLIP`, `CATALYST_ON`, `POST_LOSS_DESIZE`,
   `RR_STOP`, `RR_TARGET`, `FMP_FORCE_FAIL` (test-forces the FMP fallback path).
 
@@ -360,32 +383,47 @@ track record began 2026-07-08. Fully fail-safe (wrapped in try/except).
   verdict state; it doesn't, today.
 
 ## Reliability / heartbeat
-**Current design: two layers, no external service, no second workflow.**
+**Current design: three layers — one of them outside GitHub, which is the
+point.**
 1. **Redundant cron** — four schedule entries in `dashboard.yml` (primary pair
-   + backup pair 1hr later). Covers the trigger being dropped.
+   + backup pair 1hr later). Reduces the odds of a dropped trigger costing a
+   day: both independent fires would have to be dropped.
 2. **Exit-code-red** — a failed send exits 1, so Actions marks the run failed
    and fires its own notification. Covers a failure *within* a run.
+3. **healthchecks.io heartbeat (ACTIVE as of 2026-08-06)** — the only layer
+   that is not itself GitHub Actions, and therefore the only one that can
+   detect GitHub being wholly silent. See below.
 
-- **`dashboard-watchdog.yml` — BUILT 2026-08-04, DELETED 2026-08-06. Do not
+- **`dashboard-watchdog.yml` — BUILT 2026-08-04, DELETED 2026-08-07. Do not
   rebuild it.** It ran `00 23 * * 1-5`, checked via `gh run list` whether a
   `dashboard.yml` run had succeeded "today", and if not re-triggered it and
-  emailed an alert. It never worked, and the reason is structural, not a typo:
-  **it was scheduled on the same best-effort GitHub cron it existed to
-  monitor**, so it inherited the exact flakiness it was built to catch. Firing
-  ~1hr late against a 23:00 UTC target put it *past UTC midnight*, so its
-  `today=$(date -u +%Y-%m-%d)` named the **next** day and it asked whether the
-  dashboard had run on a day ~1 minute old. Guaranteed zero, guaranteed
-  re-trigger. Both real firings (`2026-08-05T00:05:11Z`, `2026-08-06T00:01:24Z`)
-  dispatched a redundant run ~6s later (#125, #129) and sent a "recovery
-  needed" alert while that day's scheduled run had *already succeeded* (#124,
-  #127). **2 firings, 2 false positives, 0 real catches** — an unconditional
-  daily re-runner wearing a detector's clothes, which by construction could
-  never have caught a genuinely missed day.
-  A window-based fix was written and verified, then discarded in favour of
-  deleting the thing: redundant cron achieves the same coverage with no second
-  workflow, no `actions: write` permission, no alert-email path, and nothing
-  new that can itself break. **Lesson worth keeping: a monitor that shares its
-  target's failure mode is not a monitor.**
+  emailed an alert. Two independent things were wrong with it:
+  - **It never worked, for a structural reason rather than a typo.** It was
+    scheduled on the same best-effort GitHub cron it existed to monitor, so it
+    inherited the exact flakiness it was built to catch. Firing ~1hr late
+    against a 23:00 UTC target put it *past UTC midnight*, so its
+    `today=$(date -u +%Y-%m-%d)` named the **next** day and it asked whether
+    the dashboard had run on a day ~1 minute old. Guaranteed zero, guaranteed
+    re-trigger. Both real firings (`2026-08-05T00:05:11Z`,
+    `2026-08-06T00:01:24Z`) dispatched a redundant run ~6s later (#125, #129)
+    and sent a "recovery needed" alert while that day's scheduled run had
+    *already succeeded* (#124, #127). **2 firings, 2 false positives, 0 real
+    catches** — an unconditional daily re-runner wearing a detector's clothes,
+    which by construction could never have caught a genuinely missed day.
+  - **On the one day it was needed, it didn't fire at all.** In the 2026-08-06
+    outage below its own 23:00 UTC cron was dropped alongside the dashboard's.
+    That is the shared-failure-mode risk made concrete.
+  A window-based fix for the date bug was written and verified, then discarded
+  in favour of deleting the thing outright: it would have produced a *correct*
+  monitor that still shared its target's failure mode, and the heartbeat
+  already covers detection properly from outside GitHub. Deleting it also drops
+  a second workflow, an `actions: write` permission, and a separate alert-email
+  path. **Lesson worth keeping: a monitor that shares its target's failure mode
+  is not a monitor.**
+  The one thing it uniquely offered was auto-recovery (re-dispatch without a
+  human). It never performed that correctly, and on 8/6 recovery was a manual
+  `workflow_dispatch` after the heartbeat alert. If auto-recovery is wanted
+  later, it belongs somewhere that is not GitHub cron.
 - The **healthchecks.io heartbeat** code already exists separately (fires
   only if `HEALTHCHECK_URL` is set; pings the URL on success, URL/`/fail` on
   email failure; fail-safe), and `dashboard.yml` now passes
@@ -393,19 +431,36 @@ track record began 2026-07-08. Fully fail-safe (wrapped in try/except).
   (fixed 2026-08-03 — previously the workflow's `env:` block didn't map this
   secret at all, so `cfg("HEALTHCHECK_URL")` would always read empty in
   Actions even after the secret was added; local `.env` fallback was
-  unaffected). It has **never executed**: the secret was never set, so
-  `cfg("HEALTHCHECK_URL")` reads empty and the whole block is skipped by its
-  `if _hc_url:` guard. Zero pings, zero emails, zero incidents — it has caused
-  none of the reliability problems in this repo (those were all the watchdog,
-  which was pure GitHub Actions and unrelated to healthchecks.io).
-- **Decision 2026-08-06: leave the heartbeat dormant for now.** Redundant cron
-  + exit-code-red is the whole reliability story. Revisit ONLY if a day is
-  actually missed despite both cron pairs firing — that is the one gap left
-  (total GitHub Actions silence), and it has not happened yet. Do not add
-  monitoring for a failure mode that has not occurred; that is what produced
-  the watchdog. Activation, if ever needed, is: create a check at
-  healthchecks.io with a ~24h period and ~2h grace, add an alert channel, put
-  the ping URL in the `HEALTHCHECK_URL` secret. No code change required.
+  unaffected). **Activated 2026-08-06** — the "MacroSage daily" check on
+  healthchecks.io is configured in **Simple** schedule mode (24h period / 3h
+  grace), not Cron mode. It was initially set up with a Cron schedule
+  matching the old single 22:17 UTC cron, which went stale the moment the
+  two-cron DST split shipped (2026-08-05) since healthchecks.io only supports
+  one schedule per check; switched to Simple mode instead of trying to force
+  a single cron expression to cover both DST halves of the year — deliberately
+  loose (period+grace) since the goal is "did today's ping arrive at all," not
+  minute-precision.
+
+**Incident 2026-08-06 — heartbeat caught what both internal layers missed:**
+Both `dashboard.yml`'s cron (target 21:03 UTC) and `dashboard-watchdog.yml`'s
+cron (target 23:00 UTC) silently failed to fire for 2+ hours — a genuine
+GitHub Actions scheduling outage, not a code or config bug (both workflows
+showed `state: active` via the API throughout). The healthchecks.io heartbeat
+caught it — a "DOWN | MacroSage daily" alert arrived at 23:17 UTC, external to
+GitHub and therefore not subject to the same platform issue as the watchdog.
+Recovered via a manual `workflow_dispatch` trigger at 23:26 UTC; the real
+email's delivery was confirmed directly in Gmail (not just the Actions log
+reporting success), and healthchecks.io sent the "UP" recovery alert 10m15s
+later. This is the first time the watchdog itself has been observed missing,
+and it's the exact scenario the three-layer design (see above) exists for.
+
+**Consequence of that incident (2026-08-07):** the watchdog was deleted rather
+than repaired. The outage demonstrated that a GitHub-cron monitor cannot cover
+a GitHub-cron outage, so the detection role moved wholly to the heartbeat
+(external) and the drop-resistance role moved to redundant cron entries inside
+`dashboard.yml`. The three layers above are the whole reliability story now;
+do not add a fourth without an observed failure that the existing three
+provably miss.
 
 ## Conventions (Bryan's coding rules — follow these)
 - **Zero third-party deps** — stdlib/urllib only.
@@ -424,14 +479,21 @@ Prioritised improvements (do as small, independently-verified PRs, never one big
 3. **#4 Email cadence** — send the full email only on a state change / threshold
    cross, weekly digest otherwise, plus a "what changed since yesterday" line.
    Needs Bryan's rules on what counts as a state change.
-4. **Heartbeat activation** — Bryan adds the healthchecks.io check + secret.
-5. Signal rework — **PARTIALLY DONE 2026-08-03** (user-directed "optimise for
-   correctness"): VIX backwardation reclassified as a bounce/exit cue (tile 17
-   amber not red; Layer-2 input #2 swapped to `ts_accelerating`) and the credit
-   tile level+RoC recalibration shipped. STILL OPEN: weighting vol-expansion in
-   sizing, de-duplicating correlated tile clusters in `n_stress` (breadth 7/18,
-   sentiment 15/16, rates 3/19), and the dual-red net-liquidity 13-week RoC
-   recalibration (needs dated WALCL/TGA/RRP alignment + ledger calibration).
+4. **Done 2026-08-06** — Heartbeat activated (healthchecks.io, Simple schedule:
+   24h period / 3h grace). Already proved its worth the same day, catching a
+   real multi-hour GitHub Actions scheduling outage that both `dashboard.yml`
+   and `dashboard-watchdog.yml` silently missed — see the Reliability section.
+5. Signal rework — **MOSTLY DONE** (user-directed "optimise for correctness").
+   2026-08-03: VIX backwardation reclassified as a bounce/exit cue (tile 17
+   amber not red; Layer-2 input #2 swapped to `ts_accelerating`); credit tile
+   level+RoC recalibration. 2026-08-07: vol-expansion downtrend +1 sizing
+   weight and correlated-cluster de-dup in `n_stress` (see Sizing tiers), plus
+   the dated 13-week net-liquidity RoC shipped as an **informational
+   measurement** on tile 8. LAST PIECE STILL OPEN: actually switching the
+   dual-red net-liquidity gate from week-over-week to the 13-week RoC — held
+   deliberately until the ledger accumulates enough of the now-logged 13w
+   readings to calibrate the threshold against (changing an INITIATE gate on
+   zero observed data would contradict the fail-safe convention).
 
 ## Monetization goal (Bryan)
 Not yet monetized; the aim is cash flow. A credible track record (ledger +
