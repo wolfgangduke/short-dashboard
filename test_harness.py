@@ -150,6 +150,15 @@ gA = run_scenario("fire", descending(520, 400.5, 251), 400.0,
 check(gA["initiate_short"] is True, "initiate_short is True")
 check(gA["primary"].startswith("INITIATE SHORT"), "primary starts with INITIATE SHORT")
 check("Size:" in gA["primary"], "sizing ladder present in verdict")
+# ---- sizing de-dup + vol-edge weighting (roadmap #5, 2026-08-07) ----
+check(gA["n_stress"] == gA["_n_stress_raw"] - gA["_cluster_dupes"] + gA["_vol_edge_bonus"],
+      "n_stress identity holds: raw - cluster dupes + vol-edge bonus")
+check(gA["_cluster_dupes"] >= 2,
+      "correlated pairs (breadth 7/18, sentiment 15/16 both red here) each count once (%d dupes)"
+      % gA["_cluster_dupes"])
+check(gA["_vol_edge_bonus"] == 0, "no vol-edge bonus without vol expansion")
+check(gA["netliq_13w_delta"] is None,
+      "13w netliq RoC fails safe to None on undated fixtures (no crash, no fabrication)")
 check("Exit rule" in gA["primary"], "2% exit rule stated")
 html = gA["build_html"]()
 check(">CRASH ALERT<" in html, "email banner shows CRASH ALERT (post-#21 red pill)")
@@ -266,6 +275,8 @@ check("HELD" in gB2["layer2"], "verdict text explains the hold")
 # The plain-English summary must not tell Bryan to open a starter position.
 check("starter" not in gB2["layman"].lower(),
       "plain-English summary does NOT recommend a starter short")
+check(gB2["_vol_edge_bonus"] == 0,
+      "vol-edge sizing bonus never granted in a confirmed uptrend")
 
 print("=" * 70)
 print("SCENARIO C: streak only 1/3 -> must stay WATCHING with streak blocker")
@@ -288,6 +299,8 @@ gD = run_scenario("volexp", descending(470, 452, 246) + [445, 435, 422, 410, 400
                   {"dual_red_streak": {"value": 3, "ts": "2026-07-01T00:00:00"}})
 check(gD["vol_expansion"] is True, "realized-vol expansion fires on a 5-day vol burst")
 check(gD["gamma_flip"] is True, "Layer-2 vol-regime input on (replaces manual GEX)")
+check(gD["_vol_edge_bonus"] == 1,
+      "vol expansion in a confirmed downtrend earns the +1 sizing weight (backtest edge)")
 check(gD["catalyst_auto"] is True, "catalyst auto-confirmed from price/volume (not manual)")
 check(gD["catalyst_on"] is True, "catalyst_on True via auto path")
 

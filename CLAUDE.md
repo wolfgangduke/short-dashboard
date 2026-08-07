@@ -84,7 +84,7 @@ unavailable (no live value AND no cache).
 | 5 | Commodities (Gold) | FMP quote → Yahoo → Stooq | Informational only, no directional threshold. **green** when `gold_px` is available, **gray** only on genuine fetch failure (no live value and no cache) — fixed 2026-07-31; previously hardcoded gray unconditionally, so it sat in the "No Data" bucket (see Sizing tiers) even on days it had a live price. |
 | 6 | Dollar / FX | FRED `DTWEXBGS` (broad $ index) | red if rising w/w, green if falling, amber cached, gray no data. |
 | 7 | Market breadth | FMP sector snapshot % advancing → WSJ NYSE A/D fallback | **red if <50%** (dual-red input #1), green if ≥50%, gray unavailable. |
-| 8 | Net liquidity | FRED `WALCL` − `WTREGEN` (TGA) − `RRPONTSYD` (RRP), in $T | **red/"declining"** if current < previous (dual-red input #2), green/"rising" else, gray unknown. |
+| 8 | Net liquidity | FRED `WALCL` − `WTREGEN` (TGA) − `RRPONTSYD` (RRP), in $T | **red/"declining"** if current < previous (dual-red input #2), green/"rising" else, gray unknown. **Since 2026-08-07** the sub-text also shows a date-aligned **13-week Δ ($bn), explicitly labelled informational** — it does NOT feed the color or the dual-red gate; it's the measurement phase for the roadmap-#5 RoC recalibration, shipped first so the gate switch can be calibrated against the ledger before it changes behavior. Fully fail-safe (missing/undated data → note simply absent). |
 | 9 | Positioning (COT) | CFTC E-mini S&P COT → Tradingster fallback (if CFTC >10d stale) | green if asset-mgr net long, red if net short. |
 | 10 | VVIX divergence | Yahoo `^VVIX` vs `^VIX` daily % change | red if VVIX +3%+ while VIX ≤+1%, green if VVIX ≤−2%, amber otherwise. |
 | 11 | Sector rotation | **Derived from tile 7**, not independent data | red ("defensive tilt") if breadth red, green ("broad") else. Excluded from the sizing tally for exactly this reason (see Sizing below). One of the two **MAX CONVICTION** legs. |
@@ -228,10 +228,30 @@ to MAX CONVICTION going forward.
 | `FMP_FORCE_FAIL` | Test seam only (`workflow_dispatch` input) — forces the FMP path dead to exercise the Yahoo/Stooq fallback tier. Not a trading override. |
 
 ### Sizing tiers
-Sizing uses `n_stress` (`short_dashboard.py:1621-1635`), **not** the raw
-all-tiles red count (`n_red`, still shown in the email). `n_stress` excludes
-tile 11 (Sector rotation — derived from tile 7, would double-count breadth)
-and tile 12 (Calendar gate — timing, not stress):
+Sizing uses `n_stress`, **not** the raw all-tiles red count (`n_red`, still
+shown in the email). Since 2026-08-07 (roadmap #5) `n_stress` is computed in
+three steps:
+1. **Raw tally** — count red tiles, excluding tile 11 (Sector rotation —
+   derived from tile 7, would double-count breadth) and tile 12 (Calendar
+   gate — timing, not stress).
+2. **Correlated-cluster de-dup** — subtract 1 for each pair where BOTH
+   members are red, so one underlying condition can't double-inflate sizing:
+   breadth (tiles **7 & 18**), sentiment (tiles **15 & 16**), rates (tiles
+   **3 & 19**). De-dup only ever LOWERS `n_stress`, so the tier boundaries
+   below were deliberately left unchanged — conservative bias (max possible
+   `n_stress` from tiles alone drops 17 → 14, exactly the 2.0× cap).
+3. **Vol-expansion downtrend bonus** — add **+1** iff `vol_expansion` is on
+   AND `spx_above_200dma is False` (confirmed downtrend). This is the ONE
+   component `backtest.py` found genuine short-side edge in, and only in that
+   regime; an unknown trend (`None`) earns nothing (same fail-safe stance as
+   the Layer-2 trend gate), and the direction-agnostic vol calc firing in a
+   melt-UP earns nothing.
+
+Regression-tested in `test_harness.py`: the raw−dupes+bonus identity, ≥2
+dupes in scenario A, bonus=0 without vol expansion (A) and in a confirmed
+uptrend (B2), bonus=+1 in scenario D's vol-burst downtrend.
+
+Tiers (unchanged):
 - `n_stress ≥ 14` → **2.0×** (cap)
 - `n_stress ≥ 10` → **1.5×**
 - `n_stress ≥ 6` → **1.0×** (standard)
@@ -424,13 +444,17 @@ Prioritised improvements (do as small, independently-verified PRs, never one big
    24h period / 3h grace). Already proved its worth the same day, catching a
    real multi-hour GitHub Actions scheduling outage that both `dashboard.yml`
    and `dashboard-watchdog.yml` silently missed — see the Reliability section.
-5. Signal rework — **PARTIALLY DONE 2026-08-03** (user-directed "optimise for
-   correctness"): VIX backwardation reclassified as a bounce/exit cue (tile 17
-   amber not red; Layer-2 input #2 swapped to `ts_accelerating`) and the credit
-   tile level+RoC recalibration shipped. STILL OPEN: weighting vol-expansion in
-   sizing, de-duplicating correlated tile clusters in `n_stress` (breadth 7/18,
-   sentiment 15/16, rates 3/19), and the dual-red net-liquidity 13-week RoC
-   recalibration (needs dated WALCL/TGA/RRP alignment + ledger calibration).
+5. Signal rework — **MOSTLY DONE** (user-directed "optimise for correctness").
+   2026-08-03: VIX backwardation reclassified as a bounce/exit cue (tile 17
+   amber not red; Layer-2 input #2 swapped to `ts_accelerating`); credit tile
+   level+RoC recalibration. 2026-08-07: vol-expansion downtrend +1 sizing
+   weight and correlated-cluster de-dup in `n_stress` (see Sizing tiers), plus
+   the dated 13-week net-liquidity RoC shipped as an **informational
+   measurement** on tile 8. LAST PIECE STILL OPEN: actually switching the
+   dual-red net-liquidity gate from week-over-week to the 13-week RoC — held
+   deliberately until the ledger accumulates enough of the now-logged 13w
+   readings to calibrate the threshold against (changing an INITIATE gate on
+   zero observed data would contradict the fail-safe convention).
 
 ## Monetization goal (Bryan)
 Not yet monetized; the aim is cash flow. A credible track record (ledger +
