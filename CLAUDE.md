@@ -26,8 +26,17 @@ places trades or moves money.
   target. See the workflow file's header comment for the full rationale.
   **Caveat:** GitHub does not guarantee scheduled workflows fire at the exact
   configured minute — runs have been observed firing up to ~1hr late during
-  busy periods, a platform queuing behavior outside this repo's control.
+  busy periods, and have been **dropped entirely at least twice** (Mon 8/3 and
+  Thu 8/6 2026), a platform behavior outside this repo's control.
   Also runnable by hand from the Actions tab ("Run workflow" / `workflow_dispatch`).
+- **Backup schedule (added 2026-08-06).** Because of those drops there are now
+  **four** cron entries, not two: the primary pair above plus a backup pair one
+  hour later (`'3 22 * 3-10 1-5'` EDT / `'3 23 * 11,12,1,2 1-5'` EST). Both
+  independent triggers would have to be dropped to lose a day. Running twice is
+  safe because the 4-hour send dedup makes the backup a no-op when the primary
+  already emailed, the `concurrency: short-dashboard` group serialises the two,
+  and the ledger is date-keyed so the second run rewrites its row in place
+  rather than appending. This replaced `dashboard-watchdog.yml` — see Reliability.
 - The job runs the script, which emails the dashboard, then persists `state.json`
   (last-known-value cache + signal ledger) to a **dedicated `state` branch** via
   raw git plumbing (`hash-object` / `mktree` / `commit-tree` / push) — **main is
@@ -46,8 +55,8 @@ places trades or moves money.
 - `test_harness.py` — verdict-engine test suite (fixtures, no network). Run with `py test_harness.py`; expect `RESULT: ALL CHECKS PASSED`.
 - `sim_drill.py` — escalation-drill simulator. `fmp_client.py` / `run_fmp.py` — FMP helpers/snapshot.
 - `state.json` — last-known-good cache + the signal ledger; committed back each run.
-- `.github/workflows/` — `dashboard.yml` (the daily job), `dashboard-watchdog.yml` (checks the cron actually fired; see Reliability below), `ci.yml` (runtime-error gate: runs `py_compile` + `test_harness.py` on every PR and on pushes to main), `escalation-drill.yml` (manual), `claude.yml` (PR-comment automation, unrelated to scanning).
-- `watchdog_alert.py` — standalone alert email sent by `dashboard-watchdog.yml`, stdlib only.
+- `.github/workflows/` — `dashboard.yml` (the daily job), `ci.yml` (runtime-error gate: runs `py_compile` + `test_harness.py` on every PR and on pushes to main), `escalation-drill.yml` (manual), `claude.yml` (PR-comment automation, unrelated to scanning).
+  - **`dashboard-watchdog.yml` and `watchdog_alert.py` were DELETED 2026-08-07** — the 2026-08-06 outage proved the watchdog shares its target's failure mode, and the now-active healthchecks.io heartbeat covers detection from outside GitHub. See Reliability below before recreating anything like them.
 - `reports/` — saved HTML dashboards.
 
 ## Data sources (all free; FMP still primary but now has fallbacks)
@@ -286,8 +295,10 @@ discretionary rule for Bryan to apply by hand, not a coded gate.
 - **Idempotent send** (`short_dashboard.py`, `if __name__ == "__main__":` block):
   a successful send is deduped against `email_sent_ts` (cache), skipping a
   re-send only if the last successful send was **within the last 4 hours**
-  (`DEDUP_WINDOW_HOURS`) — covers a late cron firing on top of
-  `dashboard-watchdog.yml`'s ~45-min-later recovery re-trigger. **Fixed
+  (`DEDUP_WINDOW_HOURS`) — this is what makes the backup cron pair safe: the
+  1hr-later fire is an email no-op when the primary already sent. (Until
+  2026-08-07 it covered `dashboard-watchdog.yml`'s recovery re-trigger, same
+  purpose, now-deleted mechanism.) **Fixed
   2026-08-06** after an incident where the earlier version deduped on the ET
   *calendar date* alone: a manual test run at ~2:47am ET sent successfully and
   blocked that whole day's real ~6pm ET send, 16 hours later, while still
@@ -372,27 +383,47 @@ track record began 2026-07-08. Fully fail-safe (wrapped in try/except).
   verdict state; it doesn't, today.
 
 ## Reliability / heartbeat
-- Silent-failure coverage is three-part: exit-code-red catches a failed
-  email WITHIN a run; `dashboard-watchdog.yml` catches the scheduled trigger
-  not firing at all; the healthchecks.io heartbeat below catches both plus
-  anything the watchdog itself misses — no longer theoretical, see the
-  2026-08-06 incident below, where it was the only one of the three that
-  caught the failure.
-- **`dashboard-watchdog.yml`** (added 2026-08-04, GitHub-only, no external
-  account needed): runs `00 23 * * 1-5` (23:00 UTC), checks via `gh run list`
-  whether a `schedule`-triggered `dashboard.yml` run succeeded today, and if
-  not, re-triggers it via `workflow_dispatch` and emails a heads-up
-  (`watchdog_alert.py`). Built after dashboard.yml's Monday 8/3 cron silently
-  didn't fire (no error anywhere — a known GitHub Actions best-effort-
-  scheduling gap, not a bug in this repo's config). **Buffer note (2026-08-05):**
-  dashboard.yml's schedule changed from a single fixed 22:17 UTC cron to two
-  DST-aware entries (21:03 UTC Mar-Oct / 22:03 UTC Nov-Feb — see "How it runs"
-  above); the watchdog's fixed 23:00 UTC still runs safely after both (buffer
-  is now ~2hr in EDT months, ~1hr in EST months, vs. the original flat
-  ~45min) — no watchdog change needed, just a wider/uneven margin. **Known
-  single point of failure:** the watchdog is itself a GitHub Actions cron, so
-  it shares the same platform-level scheduling risk as the job it's meant to
-  catch (see 2026-08-06 incident below, where both missed on the same day).
+**Current design: three layers — one of them outside GitHub, which is the
+point.**
+1. **Redundant cron** — four schedule entries in `dashboard.yml` (primary pair
+   + backup pair 1hr later). Reduces the odds of a dropped trigger costing a
+   day: both independent fires would have to be dropped.
+2. **Exit-code-red** — a failed send exits 1, so Actions marks the run failed
+   and fires its own notification. Covers a failure *within* a run.
+3. **healthchecks.io heartbeat (ACTIVE as of 2026-08-06)** — the only layer
+   that is not itself GitHub Actions, and therefore the only one that can
+   detect GitHub being wholly silent. See below.
+
+- **`dashboard-watchdog.yml` — BUILT 2026-08-04, DELETED 2026-08-07. Do not
+  rebuild it.** It ran `00 23 * * 1-5`, checked via `gh run list` whether a
+  `dashboard.yml` run had succeeded "today", and if not re-triggered it and
+  emailed an alert. Two independent things were wrong with it:
+  - **It never worked, for a structural reason rather than a typo.** It was
+    scheduled on the same best-effort GitHub cron it existed to monitor, so it
+    inherited the exact flakiness it was built to catch. Firing ~1hr late
+    against a 23:00 UTC target put it *past UTC midnight*, so its
+    `today=$(date -u +%Y-%m-%d)` named the **next** day and it asked whether
+    the dashboard had run on a day ~1 minute old. Guaranteed zero, guaranteed
+    re-trigger. Both real firings (`2026-08-05T00:05:11Z`,
+    `2026-08-06T00:01:24Z`) dispatched a redundant run ~6s later (#125, #129)
+    and sent a "recovery needed" alert while that day's scheduled run had
+    *already succeeded* (#124, #127). **2 firings, 2 false positives, 0 real
+    catches** — an unconditional daily re-runner wearing a detector's clothes,
+    which by construction could never have caught a genuinely missed day.
+  - **On the one day it was needed, it didn't fire at all.** In the 2026-08-06
+    outage below its own 23:00 UTC cron was dropped alongside the dashboard's.
+    That is the shared-failure-mode risk made concrete.
+  A window-based fix for the date bug was written and verified, then discarded
+  in favour of deleting the thing outright: it would have produced a *correct*
+  monitor that still shared its target's failure mode, and the heartbeat
+  already covers detection properly from outside GitHub. Deleting it also drops
+  a second workflow, an `actions: write` permission, and a separate alert-email
+  path. **Lesson worth keeping: a monitor that shares its target's failure mode
+  is not a monitor.**
+  The one thing it uniquely offered was auto-recovery (re-dispatch without a
+  human). It never performed that correctly, and on 8/6 recovery was a manual
+  `workflow_dispatch` after the heartbeat alert. If auto-recovery is wanted
+  later, it belongs somewhere that is not GitHub cron.
 - The **healthchecks.io heartbeat** code already exists separately (fires
   only if `HEALTHCHECK_URL` is set; pings the URL on success, URL/`/fail` on
   email failure; fail-safe), and `dashboard.yml` now passes
@@ -422,6 +453,14 @@ email's delivery was confirmed directly in Gmail (not just the Actions log
 reporting success), and healthchecks.io sent the "UP" recovery alert 10m15s
 later. This is the first time the watchdog itself has been observed missing,
 and it's the exact scenario the three-layer design (see above) exists for.
+
+**Consequence of that incident (2026-08-07):** the watchdog was deleted rather
+than repaired. The outage demonstrated that a GitHub-cron monitor cannot cover
+a GitHub-cron outage, so the detection role moved wholly to the heartbeat
+(external) and the drop-resistance role moved to redundant cron entries inside
+`dashboard.yml`. The three layers above are the whole reliability story now;
+do not add a fourth without an observed failure that the existing three
+provably miss.
 
 ## Conventions (Bryan's coding rules — follow these)
 - **Zero third-party deps** — stdlib/urllib only.

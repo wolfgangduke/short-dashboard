@@ -2326,10 +2326,11 @@ if __name__ == "__main__":
     log.info("recipients: %s", ", ".join(RECIPIENTS))
 
     # Idempotent send (2026-08-04, re-fixed 2026-08-06): this job can legitimately
-    # run more than once on the same trading day - a GitHub Actions cron that
-    # fires late alongside dashboard-watchdog.yml's recovery re-trigger, or a
-    # manual re-run shortly after - and without this guard that means a second,
-    # duplicate email close together in time.
+    # run more than once on the same trading day - dashboard.yml schedules a
+    # BACKUP cron pair 1hr after the primary (drop insurance; see that file),
+    # and a manual re-run can land shortly after either - and without this
+    # guard that means a second, duplicate email close together in time.
+    # This guard is what makes the redundant schedule safe.
     #
     # BUG (2026-08-05, incident): the original guard keyed on the ET calendar
     # date alone (email_sent_date == today). A manual workflow_dispatch test
@@ -2337,13 +2338,12 @@ if __name__ == "__main__":
     # the whole ET day; the real close-of-day scheduled run ~16 hours later
     # (~18:16 ET) saw the SAME date already marked sent and silently skipped
     # the actual daily email -- while still logging "email sent: YES" and
-    # exiting 0, so dashboard-watchdog.yml's success check never caught it.
+    # exiting 0, so nothing downstream caught it either.
     #
     # Fix: dedup on a TIME WINDOW (email_sent_ts, not email_sent_date). Only
     # skip if a successful send happened within the last DEDUP_WINDOW_HOURS --
-    # comfortably covers the late-cron-on-top-of-watchdog-recovery scenario
-    # this guard exists for (observed gap: well under 1 hour in practice),
-    # while no longer treating an early-morning test run as covering the
+    # comfortably covers the 1hr primary->backup cron gap this guard exists
+    # for, while no longer treating an early-morning test run as covering the
     # evening's real send.
     DEDUP_WINDOW_HOURS = 4
     _sent_ts_raw = CACHE.get("email_sent_ts")

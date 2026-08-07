@@ -34,8 +34,27 @@ on:
         type: boolean
         default: false
   schedule:
+    # PRIMARY - 17:03 ET, the intended 1hr-post-close slot.
     - cron: '3 21 * 3-10 1-5'      # EDT (Mar-Oct): 17:03 ET
     - cron: '3 22 * 11,12,1,2 1-5' # EST (Nov-Feb): 17:03 ET
+    # BACKUP - same job one hour later. GitHub's scheduler is best-effort and
+    # has silently dropped this workflow's trigger at least twice (Mon 8/3 and
+    # Thu 8/6 2026): no error, no failed run, just nothing in the history. A
+    # second independent trigger is the cheapest defence - both fires would
+    # have to be dropped to lose a day.
+    #
+    # This is safe to run twice ONLY because two guards already exist:
+    #   1. short_dashboard.py skips a re-send when the last successful send was
+    #      within DEDUP_WINDOW_HOURS=4 (short_dashboard.py:2286), so the backup
+    #      fire is a no-op email-wise when the primary already went out. The 1hr
+    #      gap sits well inside that window.
+    #   2. the `concurrency: short-dashboard` group below serialises runs, so
+    #      the two can never race on the state.json commit.
+    # The signal ledger is keyed by date and rewrites its row in place, so a
+    # second run of the day updates rather than duplicates (verified against the
+    # live ledger: 22 rows for 22 trading days, across days with 4 runs).
+    - cron: '3 22 * 3-10 1-5'      # EDT (Mar-Oct): 18:03 ET
+    - cron: '3 23 * 11,12,1,2 1-5' # EST (Nov-Feb): 18:03 ET
 
 # Allow the run to push state.json (last-known-value cache + ledger) to the
 # dedicated 'state' branch. main is never written by this workflow.
