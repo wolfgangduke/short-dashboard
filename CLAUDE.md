@@ -84,7 +84,7 @@ unavailable (no live value AND no cache).
 | 5 | Commodities (Gold) | FMP quote → Yahoo → Stooq | Informational only, no directional threshold. **green** when `gold_px` is available, **gray** only on genuine fetch failure (no live value and no cache) — fixed 2026-07-31; previously hardcoded gray unconditionally, so it sat in the "No Data" bucket (see Sizing tiers) even on days it had a live price. |
 | 6 | Dollar / FX | FRED `DTWEXBGS` (broad $ index) | red if rising w/w, green if falling, amber cached, gray no data. |
 | 7 | Market breadth | FMP sector snapshot % advancing → WSJ NYSE A/D fallback | **red if <50%** (dual-red input #1), green if ≥50%, gray unavailable. |
-| 8 | Net liquidity | FRED `WALCL` − `WTREGEN` (TGA) − `RRPONTSYD` (RRP), in $T | **red/"declining"** if current < previous (dual-red input #2), green/"rising" else, gray unknown. **Since 2026-08-07** the sub-text also shows a date-aligned **13-week Δ ($bn), explicitly labelled informational** — it does NOT feed the color or the dual-red gate; it's the measurement phase for the roadmap-#5 RoC recalibration, shipped first so the gate switch can be calibrated against the ledger before it changes behavior. Fully fail-safe (missing/undated data → note simply absent). |
+| 8 | Net liquidity | FRED `WALCL` − `WTREGEN` (TGA) − `RRPONTSYD` (RRP), in $T | **red/"declining"** (dual-red input #2) if week-over-week current < previous **OR** the date-aligned **13-week Δ ≤ −100 $bn** ("SUSTAINED DRAIN" — added 2026-08-07, closes the miss-mode where a one-week bounce mid-drain flipped w/w to "rising" and reset the dual-red streak; regression: `test_harness.py` SCENARIO D2). The OR can only ADD sensitivity vs. the old w/w-only rule, never remove it. When the 13w Δ is above the drain floor it renders on the sub-text as "(informational)". The −100 $bn floor is PROVISIONAL pending ledger calibration; the full w/w→13w *replacement* (noise reduction) still waits on that data. green/"rising" else, gray unknown; 13w unavailable → pure w/w (fail-safe). |
 | 9 | Positioning (COT) | CFTC E-mini S&P COT → Tradingster fallback (if CFTC >10d stale) | green if asset-mgr net long, red if net short. |
 | 10 | VVIX divergence | Yahoo `^VVIX` vs `^VIX` daily % change | red if VVIX +3%+ while VIX ≤+1%, green if VVIX ≤−2%, amber otherwise. |
 | 11 | Sector rotation | **Derived from tile 7**, not independent data | red ("defensive tilt") if breadth red, green ("broad") else. Excluded from the sizing tally for exactly this reason (see Sizing below). One of the two **MAX CONVICTION** legs. |
@@ -103,8 +103,9 @@ only when **every** gate below is positively confirmed — fail-closed by
 default (unknown data blocks; INITIATE can never fire on missing inputs),
 **except the FOMC gate, which is deliberately fail-open**:
 1. **Dual-red streak ≥ 3** — tile 7 breadth <50% AND tile 8 net liquidity
-   declining, for 3 consecutive *trading* sessions (session-guarded: weekend/
-   holiday/repeat-same-day runs cannot inflate the streak).
+   declining (w/w decline OR sustained 13-week drain ≤ −100 $bn — see the
+   tile 8 row), for 3 consecutive *trading* sessions (session-guarded:
+   weekend/holiday/repeat-same-day runs cannot inflate the streak).
 2. **SPX confirmed below its 200-day MA** (`spx_above_200dma is False`; `None`
    = unknown = blocks).
 3. **SPX confirmed below its monthly 10-month EMA** (`spx_above_10mema is
@@ -449,12 +450,14 @@ Prioritised improvements (do as small, independently-verified PRs, never one big
    amber not red; Layer-2 input #2 swapped to `ts_accelerating`); credit tile
    level+RoC recalibration. 2026-08-07: vol-expansion downtrend +1 sizing
    weight and correlated-cluster de-dup in `n_stress` (see Sizing tiers), plus
-   the dated 13-week net-liquidity RoC shipped as an **informational
-   measurement** on tile 8. LAST PIECE STILL OPEN: actually switching the
-   dual-red net-liquidity gate from week-over-week to the 13-week RoC — held
-   deliberately until the ledger accumulates enough of the now-logged 13w
-   readings to calibrate the threshold against (changing an INITIATE gate on
-   zero observed data would contradict the fail-safe convention).
+   the dated 13-week net-liquidity RoC shipped on tile 8. Later on 2026-08-07
+   (user-directed, "we may miss a short signal"): the dual-red net-liquidity
+   input upgraded to **w/w OR sustained-13w-drain (≤ −100 $bn)** — an OR only
+   ever adds sensitivity, so it closes the mid-drain-bounce miss-mode without
+   any risk of missing what the old rule caught. LAST PIECE STILL OPEN: the
+   full w/w → 13w *replacement* (dropping the noisy w/w leg for false-positive
+   reduction) plus calibrating the −100 $bn floor — both wait on the ledger
+   accumulating the now-logged 13w readings.
 
 ## Monetization goal (Bryan)
 Not yet monetized; the aim is cash flow. A credible track record (ledger +

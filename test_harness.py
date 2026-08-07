@@ -305,6 +305,34 @@ check(gD["catalyst_auto"] is True, "catalyst auto-confirmed from price/volume (n
 check(gD["catalyst_on"] is True, "catalyst_on True via auto path")
 
 print("=" * 70)
+print("SCENARIO D2: netliq w/w BOUNCE mid-drain -> 13w sustained-drain OR-leg")
+print("             keeps dual-red input #2 red (2026-08-07 miss-mode fix)")
+print("=" * 70)
+# Dated WALCL fixture: last ~50 weekdays at 6,350,000 ($6.35T), older 50 at
+# 6,500,000 -> week-over-week reads FLAT ("rising", the bounce) while the
+# 13-week delta is -150 $bn, past the -100 $bn sustained-drain floor. The
+# same dated payload serves both fred_series (w/w) and _fred_series_dated
+# (13w) since the parsers share the URL substring match.
+gD2 = run_scenario("nl13w", descending(520, 400.5, 251), 400.0,
+                   {"dual_red_streak": {"value": 3, "ts": "2026-07-01T00:00:00"}},
+                   extra=[("stlouisfed", "series_id=WALCL",
+                           fred_dated([6350000] * 50 + [6500000] * 50)),
+                          ("stlouisfed", "series_id=WTREGEN",
+                           fred_dated([700000] * 100)),
+                          ("stlouisfed", "series_id=RRPONTSYD",
+                           fred_dated([500] * 100))])
+check(gD2["netliq_dir"] == "rising",
+      "w/w alone reads NOT declining (the mid-drain bounce)")
+check(gD2["netliq_13w_delta"] is not None and gD2["netliq_13w_delta"] <= -100.0,
+      "13w delta computed and past the -100 $bn drain floor (%s)"
+      % gD2["netliq_13w_delta"])
+check(gD2["netliq_decl"] is True,
+      "dual-red input #2 stays red via the 13w OR-leg despite the w/w bounce")
+check(gD2["p"][7][2] == "red", "tile 8 renders red on the sustained-drain leg")
+check("SUSTAINED DRAIN" in gD2["p"][7][1],
+      "tile 8 sub-text names the sustained drain as a gate input")
+
+print("=" * 70)
 print("SCENARIO E: 10M-EMA gate blocks + banner regression (INITIATE SHORT")
 print("            blocked text in primary must still render WATCHING)")
 print("=" * 70)

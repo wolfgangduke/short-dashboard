@@ -1012,7 +1012,27 @@ try:
 except Exception as _nl_ex:
     log.warning("net liquidity 13w RoC failed (non-fatal, informational only): %s", _nl_ex)
 breadth_red = breadth is not None and breadth < 50
-netliq_decl = netliq_dir == "declining"
+# ---- dual-red input #2: w/w OR sustained 13-week drain (2026-08-07) ---------
+# The week-over-week rule alone has a real miss-mode: a single up-week BOUNCE
+# in the middle of a sustained liquidity drain flips it to "rising", breaks
+# the 3-session dual-red streak, and resets the INITIATE clock exactly when
+# the regime evidence is strongest. The 13-week measure sees through that
+# bounce, so the gate is now (w/w declining) OR (13w delta <= -100 $bn).
+# An OR can only ADD sensitivity relative to the old rule - it catches
+# everything w/w caught, so it cannot cause a miss the old rule wouldn't
+# also have had. The -100 $bn materiality floor (~1.7%% of current netliq)
+# keeps ordinary weekly TGA/RRP wiggle from tripping the sustained-drain leg;
+# it is PROVISIONAL pending ledger calibration - the separately-planned full
+# w/w -> 13w REPLACEMENT (noise reduction) still waits on that data. 13w
+# unavailable -> the leg simply contributes nothing (falls back to pure w/w).
+NETLIQ_13W_DRAIN_BN = 100.0
+_netliq_13w_drain = (netliq_13w_delta is not None
+                     and netliq_13w_delta <= -NETLIQ_13W_DRAIN_BN)
+netliq_decl = (netliq_dir == "declining") or _netliq_13w_drain
+if _netliq_13w_drain:
+    log.info("net liquidity: SUSTAINED 13W DRAIN (%+.0f $bn <= -%.0f) - dual-red "
+             "input #2 red%s", netliq_13w_delta, NETLIQ_13W_DRAIN_BN,
+             "" if netliq_dir == "declining" else " despite w/w '%s'" % netliq_dir)
 if breadth_red and netliq_decl:
     primary = "WATCHING - both triggers RED (confirm 3-day streak)"
 else:
@@ -1608,11 +1628,16 @@ p.append(("6. Dollar / FX", usd_sub, usd_col))
 p.append(("7. Market breadth",
           ("%d%% advancing" % breadth) if breadth is not None else "unavailable",
           ("red" if breadth_red else ("green" if breadth is not None else "gray"))))
+_nl13_txt = ((" | 13w Δ %+.0f$bn — SUSTAINED DRAIN (gate input)"
+              if _netliq_13w_drain else " | 13w Δ %+.0f$bn (informational)")
+             % netliq_13w_delta) if netliq_13w_delta is not None else ""
 p.append(("8. Net liquidity",
-          ((netliq_dir + (" | 13w Δ %+.0f$bn (informational)" % netliq_13w_delta
-                          if netliq_13w_delta is not None else ""))
-           if netliq_dir else "unavailable"),
-          ("red" if netliq_dir == "declining" else ("green" if netliq_dir == "rising" else "gray"))))
+          ((netliq_dir + _nl13_txt) if netliq_dir
+           else (("w/w unavailable" + _nl13_txt) if netliq_13w_delta is not None
+                 else "unavailable")),
+          ("red" if netliq_decl
+           else ("green" if (netliq_dir == "rising" or netliq_13w_delta is not None)
+                 else "gray"))))
 p.append(("9. Positioning (COT)", cot_sub, cot_col))
 p.append(("10. VVIX divergence", vvix_sub, vvix_col))
 p.append(("11. Sector rotation",
